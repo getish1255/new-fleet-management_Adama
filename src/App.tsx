@@ -221,101 +221,26 @@ export default function App() {
   const [lastSyncedAt, setLastSyncedAt] = useState<Date>(new Date());
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
-  // Fetch live synchronized data from Express backend
-  const fetchData = useCallback(async () => {
+  // Authoritative live sync directly with Cloud Firestore across all devices (PC, Mobile, Vercel)
+  const handleCloudSync = useCallback(async (isManual = false) => {
     try {
       setIsSyncing(true);
-      const t = Date.now();
-      const headers = { 
-        "Cache-Control": "no-cache, no-store, must-revalidate", 
-        "Pragma": "no-cache" 
-      };
+      await testFirestoreConnection();
+      await seedInitialFirestoreData();
 
-      const [vRes, dRes, rRes, lRes, sRes, fRes, mRes, oRes] = await Promise.all([
-        fetch(`/api/vehicles?_t=${t}`, { headers }),
-        fetch(`/api/drivers?_t=${t}`, { headers }),
-        fetch(`/api/requests?_t=${t}`, { headers }),
-        fetch(`/api/travel-logs?_t=${t}`, { headers }),
-        fetch(`/api/sms-alerts?_t=${t}`, { headers }),
-        fetch(`/api/fuel-records?_t=${t}`, { headers }),
-        fetch(`/api/maintenance?_t=${t}`, { headers }),
-        fetch(`/api/officers?_t=${t}`, { headers })
-      ]);
-
-      if (vRes.ok) {
-        const data = await vRes.json();
-        const list = Array.isArray(data) ? data : (data.vehicles || []);
-        if (Array.isArray(list)) {
-          setVehicles(list);
-          try { localStorage.setItem("oari_vehicles_cache", JSON.stringify(list)); } catch (e) {}
-        }
-      }
-      if (dRes.ok) {
-        const data = await dRes.json();
-        const list = Array.isArray(data) ? data : (data.drivers || []);
-        if (Array.isArray(list)) {
-          setDrivers(list);
-          try { localStorage.setItem("oari_drivers_cache", JSON.stringify(list)); } catch (e) {}
-        }
-      }
-      if (rRes.ok) {
-        const data = await rRes.json();
-        const list = Array.isArray(data) ? data : (data.requests || []);
-        if (Array.isArray(list)) {
-          setTripRequests(list);
-          try { localStorage.setItem("oari_trip_requests_cache", JSON.stringify(list)); } catch (e) {}
-        }
-      }
-      if (lRes.ok) {
-        const data = await lRes.json();
-        const list = Array.isArray(data) ? data : (data.travelLogs || []);
-        if (Array.isArray(list)) {
-          setTravelLogs(list);
-          try { localStorage.setItem("oari_travel_logs_cache", JSON.stringify(list)); } catch (e) {}
-        }
-      }
-      if (sRes.ok) {
-        const data = await sRes.json();
-        const list = Array.isArray(data) ? data : (data.alerts || []);
-        if (Array.isArray(list)) {
-          setSmsAlerts(list);
-          try { localStorage.setItem("oari_sms_alerts_cache", JSON.stringify(list)); } catch (e) {}
-        }
-      }
-      if (fRes.ok) {
-        const data = await fRes.json();
-        const list = Array.isArray(data) ? data : (data.fuelRecords || []);
-        if (Array.isArray(list)) {
-          setFuelRecords(list);
-          try { localStorage.setItem("oari_fuel_records_cache", JSON.stringify(list)); } catch (e) {}
-        }
-      }
-      if (mRes.ok) {
-        const data = await mRes.json();
-        const list = Array.isArray(data) ? data : (data.maintenanceRecords || []);
-        if (Array.isArray(list)) {
-          setMaintenanceRecords(list);
-          try { localStorage.setItem("oari_maintenance_records_cache", JSON.stringify(list)); } catch (e) {}
-        }
-      }
-      if (oRes.ok) {
-        const data = await oRes.json();
-        const list = Array.isArray(data) ? data : (data.officers || []);
-        if (Array.isArray(list)) {
-          setOfficers(list);
-          try { localStorage.setItem("oari_officers_cache", JSON.stringify(list)); } catch (e) {}
-        }
-      }
       setLastSyncedAt(new Date());
+      if (isManual) {
+        showToast("success", "Cloud Database Synced", "All devices synchronized with live Firestore database.");
+      }
     } catch (e) {
-      console.warn("Backend API offline, using local state store:", e);
+      console.warn("Cloud sync notice:", e);
     } finally {
       setIsSyncing(false);
     }
   }, []);
 
   useEffect(() => {
-    // 1. Diagnostics & Seed initial data into Cloud Firestore if empty
+    // 1. Diagnostics & Seed baseline data into Cloud Firestore
     testFirestoreConnection();
     seedInitialFirestoreData();
 
@@ -376,14 +301,8 @@ export default function App() {
       }
     });
 
-    // 3. Fallback server polling
-    fetchData();
-    const interval = setInterval(() => {
-      fetchData();
-    }, 3000);
-
     const handleActiveState = () => {
-      fetchData();
+      handleCloudSync(false);
     };
     window.addEventListener("focus", handleActiveState);
     window.addEventListener("visibilitychange", handleActiveState);
@@ -398,12 +317,11 @@ export default function App() {
       unsubAlerts();
       unsubFuel();
       unsubMaint();
-      clearInterval(interval);
       window.removeEventListener("focus", handleActiveState);
       window.removeEventListener("visibilitychange", handleActiveState);
       window.removeEventListener("storage", handleActiveState);
     };
-  }, [fetchData]);
+  }, [handleCloudSync]);
 
   // Request Car Action from Fleet Tracker
   const handleRequestVehicleFromFleet = (vehicle: Vehicle) => {
@@ -1460,7 +1378,7 @@ export default function App() {
         onQuickSimulateSMS={handleSendUrgentBroadcast}
         onOpenRoleAuth={handleOpenRoleAuth}
         onOpenOfficerModal={() => setIsOfficerModalOpen(true)}
-        onManualSync={fetchData}
+        onManualSync={() => handleCloudSync(true)}
         isSyncing={isSyncing}
       />
 

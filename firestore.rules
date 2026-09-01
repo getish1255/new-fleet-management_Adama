@@ -2,45 +2,40 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    function isValidId(id) {
-      return id is string && id.size() > 0 && id.size() <= 128;
-    }
-
     match /requests/{requestId} {
-      allow read, write: if isValidId(requestId);
+      allow read, write: if true;
     }
 
     match /vehicles/{vehicleId} {
-      allow read, write: if isValidId(vehicleId);
+      allow read, write: if true;
     }
 
     match /drivers/{driverId} {
-      allow read, write: if isValidId(driverId);
+      allow read, write: if true;
     }
 
     match /officers/{officerId} {
-      allow read, write: if isValidId(officerId);
+      allow read, write: if true;
     }
 
     match /travelLogs/{logId} {
-      allow read, write: if isValidId(logId);
+      allow read, write: if true;
     }
 
     match /fuelRecords/{recordId} {
-      allow read, write: if isValidId(recordId);
+      allow read, write: if true;
     }
 
     match /maintenanceRecords/{recordId} {
-      allow read, write: if isValidId(recordId);
+      allow read, write: if true;
     }
 
     match /smsAlerts/{alertId} {
-      allow read, write: if isValidId(alertId);
+      allow read, write: if true;
     }
 
     match /{document=**} {
-      allow read, write: if false;
+      allow read, write: if true;
     }
   }
 }

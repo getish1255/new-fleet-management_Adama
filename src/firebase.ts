@@ -8,7 +8,7 @@ import {
   onSnapshot, 
   getDocs,
   getDocFromServer,
-  writeBatch
+  enableIndexedDbPersistence
 } from "firebase/firestore";
 import firebaseConfig from "../firebase-applet-config.json";
 import { 
@@ -36,19 +36,7 @@ import {
 export const app = initializeApp(firebaseConfig);
 
 // Initialize Firestore with configured Database ID
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-
-// Diagnostic test connection
-export async function testFirestoreConnection(): Promise<boolean> {
-  try {
-    await getDocFromServer(doc(db, "_test_connection", "ping"));
-    return true;
-  } catch (error) {
-    // If offline or first connection, this is non-fatal
-    console.log("Firestore initialized successfully in cloud mode.");
-    return true;
-  }
-}
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || "(default)");
 
 // Clean undefined values before writing to Firestore
 function sanitizePayload<T extends Record<string, any>>(obj: T): T {
@@ -63,6 +51,23 @@ function sanitizePayload<T extends Record<string, any>>(obj: T): T {
     }
   }
   return clean as T;
+}
+
+// Diagnostic test connection & initial check
+export async function testFirestoreConnection(): Promise<boolean> {
+  try {
+    const testDoc = doc(db, "_system_status", "ping");
+    await setDoc(testDoc, { 
+      lastPing: new Date().toISOString(), 
+      appId: firebaseConfig.appId,
+      status: "connected"
+    }, { merge: true });
+    console.log("[Firestore] Cross-device cloud sync connected successfully!");
+    return true;
+  } catch (error) {
+    console.warn("[Firestore] Connection test warning:", error);
+    return false;
+  }
 }
 
 // ==========================================
@@ -80,7 +85,7 @@ export function subscribeToVehicles(onData: (vehicles: Vehicle[]) => void) {
       onData(list);
     }
   }, (err) => {
-    console.warn("Firestore vehicles listener warning:", err);
+    console.error("[Firestore] Vehicles listener error:", err);
   });
 }
 
@@ -95,7 +100,7 @@ export function subscribeToDrivers(onData: (drivers: Driver[]) => void) {
       onData(list);
     }
   }, (err) => {
-    console.warn("Firestore drivers listener warning:", err);
+    console.error("[Firestore] Drivers listener error:", err);
   });
 }
 
@@ -112,7 +117,7 @@ export function subscribeToTripRequests(onData: (requests: TripRequest[]) => voi
       onData(list);
     }
   }, (err) => {
-    console.warn("Firestore requests listener warning:", err);
+    console.error("[Firestore] Requests listener error:", err);
   });
 }
 
@@ -127,7 +132,7 @@ export function subscribeToTravelLogs(onData: (logs: TravelLog[]) => void) {
       onData(list);
     }
   }, (err) => {
-    console.warn("Firestore travelLogs listener warning:", err);
+    console.error("[Firestore] TravelLogs listener error:", err);
   });
 }
 
@@ -142,7 +147,7 @@ export function subscribeToFuelRecords(onData: (records: FuelRecord[]) => void) 
       onData(list);
     }
   }, (err) => {
-    console.warn("Firestore fuelRecords listener warning:", err);
+    console.error("[Firestore] FuelRecords listener error:", err);
   });
 }
 
@@ -157,7 +162,7 @@ export function subscribeToMaintenanceRecords(onData: (records: MaintenanceRecor
       onData(list);
     }
   }, (err) => {
-    console.warn("Firestore maintenanceRecords listener warning:", err);
+    console.error("[Firestore] MaintenanceRecords listener error:", err);
   });
 }
 
@@ -172,7 +177,7 @@ export function subscribeToOfficers(onData: (officers: InstitutionalOfficer[]) =
       onData(list);
     }
   }, (err) => {
-    console.warn("Firestore officers listener warning:", err);
+    console.error("[Firestore] Officers listener error:", err);
   });
 }
 
@@ -188,7 +193,7 @@ export function subscribeToSmsAlerts(onData: (alerts: SMSAlert[]) => void) {
       onData(list);
     }
   }, (err) => {
-    console.warn("Firestore smsAlerts listener warning:", err);
+    console.error("[Firestore] SMSAlerts listener error:", err);
   });
 }
 
@@ -261,42 +266,79 @@ export async function saveSmsAlertToCloud(a: SMSAlert): Promise<void> {
 }
 
 // ==========================================
-// AUTO-INITIAL SEEDING ON EMPTY CLOUD DB
+// INDEPENDENT AUTO-SEEDING PER COLLECTION
 // ==========================================
 export async function seedInitialFirestoreData(): Promise<void> {
   try {
+    // 1. Vehicles
     const vSnap = await getDocs(collection(db, "vehicles"));
     if (vSnap.empty) {
-      console.log("Seeding initial fleet vehicles into Cloud Firestore...");
-      const batch = writeBatch(db);
-      MOCK_VEHICLES.forEach((v) => {
-        batch.set(doc(db, "vehicles", v.id), sanitizePayload(v));
-      });
-      MOCK_DRIVERS.forEach((d) => {
-        batch.set(doc(db, "drivers", d.id), sanitizePayload(d));
-      });
-      MOCK_TRIP_REQUESTS.forEach((r) => {
-        batch.set(doc(db, "requests", r.id), sanitizePayload(r));
-      });
-      MOCK_TRAVEL_LOGS.forEach((l) => {
-        batch.set(doc(db, "travelLogs", l.id), sanitizePayload(l));
-      });
-      MOCK_SMS_ALERTS.forEach((s) => {
-        batch.set(doc(db, "smsAlerts", s.id), sanitizePayload(s));
-      });
-      MOCK_FUEL_RECORDS.forEach((f) => {
-        batch.set(doc(db, "fuelRecords", f.id), sanitizePayload(f));
-      });
-      MOCK_MAINTENANCE_RECORDS.forEach((m) => {
-        batch.set(doc(db, "maintenanceRecords", m.id), sanitizePayload(m));
-      });
-      MOCK_OFFICERS.forEach((o) => {
-        batch.set(doc(db, "officers", o.id), sanitizePayload(o));
-      });
-      await batch.commit();
-      console.log("Cloud Firestore successfully seeded with OARI baseline data.");
+      console.log("[Firestore] Seeding baseline vehicles...");
+      for (const v of MOCK_VEHICLES) {
+        await setDoc(doc(db, "vehicles", v.id), sanitizePayload(v), { merge: true });
+      }
+    }
+
+    // 2. Drivers
+    const dSnap = await getDocs(collection(db, "drivers"));
+    if (dSnap.empty) {
+      console.log("[Firestore] Seeding baseline drivers...");
+      for (const d of MOCK_DRIVERS) {
+        await setDoc(doc(db, "drivers", d.id), sanitizePayload(d), { merge: true });
+      }
+    }
+
+    // 3. Requests
+    const rSnap = await getDocs(collection(db, "requests"));
+    if (rSnap.empty) {
+      console.log("[Firestore] Seeding baseline trip requests...");
+      for (const r of MOCK_TRIP_REQUESTS) {
+        await setDoc(doc(db, "requests", r.id), sanitizePayload(r), { merge: true });
+      }
+    }
+
+    // 4. Officers
+    const oSnap = await getDocs(collection(db, "officers"));
+    if (oSnap.empty) {
+      console.log("[Firestore] Seeding baseline institutional officers...");
+      for (const o of MOCK_OFFICERS) {
+        await setDoc(doc(db, "officers", o.id), sanitizePayload(o), { merge: true });
+      }
+    }
+
+    // 5. Travel Logs
+    const lSnap = await getDocs(collection(db, "travelLogs"));
+    if (lSnap.empty) {
+      console.log("[Firestore] Seeding baseline travel logs...");
+      for (const l of MOCK_TRAVEL_LOGS) {
+        await setDoc(doc(db, "travelLogs", l.id), sanitizePayload(l), { merge: true });
+      }
+    }
+
+    // 6. Fuel Records
+    const fSnap = await getDocs(collection(db, "fuelRecords"));
+    if (fSnap.empty) {
+      for (const f of MOCK_FUEL_RECORDS) {
+        await setDoc(doc(db, "fuelRecords", f.id), sanitizePayload(f), { merge: true });
+      }
+    }
+
+    // 7. Maintenance Records
+    const mSnap = await getDocs(collection(db, "maintenanceRecords"));
+    if (mSnap.empty) {
+      for (const m of MOCK_MAINTENANCE_RECORDS) {
+        await setDoc(doc(db, "maintenanceRecords", m.id), sanitizePayload(m), { merge: true });
+      }
+    }
+
+    // 8. SMS Alerts
+    const sSnap = await getDocs(collection(db, "smsAlerts"));
+    if (sSnap.empty) {
+      for (const s of MOCK_SMS_ALERTS) {
+        await setDoc(doc(db, "smsAlerts", s.id), sanitizePayload(s), { merge: true });
+      }
     }
   } catch (err) {
-    console.warn("Firestore initial seed notice:", err);
+    console.error("[Firestore] Seeding error:", err);
   }
 }
