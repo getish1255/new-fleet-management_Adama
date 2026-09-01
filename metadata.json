@@ -1,0 +1,6 @@
+{
+  "name": "OARI Fleet Logistics - Car Fleet Management",
+  "description": "Comprehensive vehicle fleet management system for Oromia Agricultural Research Institute with transportation booking, real-time vehicle dispatch, automated travel logs, driver & customer instant SMS alerts, fuel consumption analytics, and predictive maintenance scheduling.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
