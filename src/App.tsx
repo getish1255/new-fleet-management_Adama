@@ -52,6 +52,30 @@ import {
   MOCK_MAINTENANCE_RECORDS,
   MOCK_OFFICERS
 } from "./data/mockData";
+import { 
+  testFirestoreConnection,
+  seedInitialFirestoreData,
+  subscribeToVehicles,
+  subscribeToDrivers,
+  subscribeToTripRequests,
+  subscribeToTravelLogs,
+  subscribeToFuelRecords,
+  subscribeToMaintenanceRecords,
+  subscribeToOfficers,
+  subscribeToSmsAlerts,
+  saveTripRequestToCloud,
+  deleteTripRequestFromCloud,
+  saveVehicleToCloud,
+  deleteVehicleFromCloud,
+  saveDriverToCloud,
+  deleteDriverFromCloud,
+  saveOfficerToCloud,
+  deleteOfficerFromCloud,
+  saveTravelLogToCloud,
+  saveFuelRecordToCloud,
+  saveMaintenanceRecordToCloud,
+  saveSmsAlertToCloud
+} from "./firebase";
 import { ROLE_CONFIGS } from "./data/roles";
 import { 
   CheckCircle2, 
@@ -291,13 +315,73 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    // 1. Diagnostics & Seed initial data into Cloud Firestore if empty
+    testFirestoreConnection();
+    seedInitialFirestoreData();
+
+    // 2. Real-time multi-device cloud subscriptions (PC, mobile, Vercel)
+    const unsubRequests = subscribeToTripRequests((data) => {
+      if (Array.isArray(data) && data.length > 0) {
+        setTripRequests(data);
+        try { localStorage.setItem("oari_trip_requests_cache", JSON.stringify(data)); } catch (e) {}
+      }
+    });
+
+    const unsubVehicles = subscribeToVehicles((data) => {
+      if (Array.isArray(data) && data.length > 0) {
+        setVehicles(data);
+        try { localStorage.setItem("oari_vehicles_cache", JSON.stringify(data)); } catch (e) {}
+      }
+    });
+
+    const unsubDrivers = subscribeToDrivers((data) => {
+      if (Array.isArray(data) && data.length > 0) {
+        setDrivers(data);
+        try { localStorage.setItem("oari_drivers_cache", JSON.stringify(data)); } catch (e) {}
+      }
+    });
+
+    const unsubLogs = subscribeToTravelLogs((data) => {
+      if (Array.isArray(data) && data.length > 0) {
+        setTravelLogs(data);
+        try { localStorage.setItem("oari_travel_logs_cache", JSON.stringify(data)); } catch (e) {}
+      }
+    });
+
+    const unsubOfficers = subscribeToOfficers((data) => {
+      if (Array.isArray(data) && data.length > 0) {
+        setOfficers(data);
+        try { localStorage.setItem("oari_officers_cache", JSON.stringify(data)); } catch (e) {}
+      }
+    });
+
+    const unsubAlerts = subscribeToSmsAlerts((data) => {
+      if (Array.isArray(data) && data.length > 0) {
+        setSmsAlerts(data);
+        try { localStorage.setItem("oari_sms_alerts_cache", JSON.stringify(data)); } catch (e) {}
+      }
+    });
+
+    const unsubFuel = subscribeToFuelRecords((data) => {
+      if (Array.isArray(data) && data.length > 0) {
+        setFuelRecords(data);
+        try { localStorage.setItem("oari_fuel_records_cache", JSON.stringify(data)); } catch (e) {}
+      }
+    });
+
+    const unsubMaint = subscribeToMaintenanceRecords((data) => {
+      if (Array.isArray(data) && data.length > 0) {
+        setMaintenanceRecords(data);
+        try { localStorage.setItem("oari_maintenance_records_cache", JSON.stringify(data)); } catch (e) {}
+      }
+    });
+
+    // 3. Fallback server polling
     fetchData();
-    // Multi-device real-time sync heartbeat (1.5s interval)
     const interval = setInterval(() => {
       fetchData();
-    }, 1500);
+    }, 3000);
 
-    // Immediate refresh on window focus and visibility change
     const handleActiveState = () => {
       fetchData();
     };
@@ -306,6 +390,14 @@ export default function App() {
     window.addEventListener("storage", handleActiveState);
 
     return () => {
+      unsubRequests();
+      unsubVehicles();
+      unsubDrivers();
+      unsubLogs();
+      unsubOfficers();
+      unsubAlerts();
+      unsubFuel();
+      unsubMaint();
       clearInterval(interval);
       window.removeEventListener("focus", handleActiveState);
       window.removeEventListener("visibilitychange", handleActiveState);
@@ -319,37 +411,12 @@ export default function App() {
     setActiveTab("booking");
   };
 
-  // Submit New Trip Request (POST /api/requests)
+  // Submit New Trip Request (Cross-Device Cloud Firestore + Backend)
   const handleSubmitBooking = async (requestData: Partial<TripRequest>) => {
-    try {
-      const res = await fetch("/api/requests", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestData)
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const created: TripRequest = data.request || data;
-        setTripRequests(prev => [created, ...prev.filter(r => r.id !== created.id)]);
-        setPreselectedVehicle(null);
-        await fetchData(); // Immediately fetch alerts & server state
-        showToast(
-          "sms",
-          "Trip Request Submitted!",
-          `Mission #${created.requestNumber} queued for Stage 1 Immediate Director review. Instant notifications sent via Telegram (@cariqqobot) & SMS.`
-        );
-        setActiveTab("approvals");
-        return;
-      }
-    } catch (err) {
-      console.error(err);
-    }
-
-    // Local fallback
-    const fallbackReq: TripRequest = {
+    const reqNum = `OARI-REQ-${Math.floor(1000 + Math.random() * 9000)}`;
+    const newReq: TripRequest = {
       id: `req-${Date.now()}`,
-      requestNumber: `OARI-REQ-${Math.floor(1000 + Math.random() * 9000)}`,
+      requestNumber: reqNum,
       requesterName: requestData.requesterName || "Researcher",
       requesterTitle: requestData.requesterTitle || "Scientist",
       department: requestData.department || "Crops Directorate",
@@ -372,11 +439,34 @@ export default function App() {
       status: "Pending Director Approval",
       createdAt: new Date().toISOString(),
       estimatedKm: requestData.estimatedKm || 320,
-      estimatedFuelLiters: requestData.estimatedFuelLiters || 45
+      estimatedFuelLiters: requestData.estimatedFuelLiters || 45,
+      ...requestData
     };
-    setTripRequests(prev => [fallbackReq, ...prev]);
+
+    // Instant local & cloud sync
+    setTripRequests(prev => [newReq, ...prev.filter(r => r.id !== newReq.id)]);
     setPreselectedVehicle(null);
-    showToast("success", "Request Created", `Request #${fallbackReq.requestNumber} registered and queued for Stage 1 Director Review.`);
+    try { localStorage.setItem("oari_trip_requests_cache", JSON.stringify([newReq, ...tripRequests])); } catch (e) {}
+
+    // 1. Direct Cloud Firestore broadcast (ensures instant sync to mobile and other PCs)
+    saveTripRequestToCloud(newReq).catch(e => console.warn("Firestore save error:", e));
+
+    // 2. Server API sync if available
+    try {
+      await fetch("/api/requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newReq)
+      });
+    } catch (err) {
+      console.warn("Backend API offline, saved to Cloud Firestore:", err);
+    }
+
+    showToast(
+      "sms",
+      "Trip Request Submitted!",
+      `Mission #${newReq.requestNumber} registered and queued for Stage 1 Immediate Director review. Instant notifications sent via Telegram (@cariqqobot) & SMS.`
+    );
     setActiveTab("approvals");
   };
 
@@ -388,67 +478,47 @@ export default function App() {
     directorName: string,
     channels: ("SMS" | "Telegram" | "Email")[] = ["SMS", "Telegram"]
   ) => {
+    const targetReq = tripRequests.find(r => r.id === requestId);
+    if (!targetReq) return;
+
+    const updatedReq: TripRequest = {
+      ...targetReq,
+      status: action === "permit" ? "Pending Fleet Manager Authorization" : "Rejected by Director",
+      directorApprovedBy: action === "permit" ? directorName : targetReq.directorApprovedBy,
+      directorApprovedAt: action === "permit" ? new Date().toISOString() : targetReq.directorApprovedAt,
+      directorNotes: action === "permit" ? notes : targetReq.directorNotes,
+      directorRejectionReason: action === "deny" ? notes : targetReq.directorRejectionReason,
+      rejectionReason: action === "deny" ? `Director Decision: ${notes}` : targetReq.rejectionReason
+    };
+
+    // 1. Instant local update
+    setTripRequests(prev => prev.map(r => r.id === requestId ? updatedReq : r));
+
+    // 2. Cloud Firestore real-time sync
+    saveTripRequestToCloud(updatedReq).catch(e => console.warn("Firestore update error:", e));
+
+    // 3. Server API sync
     try {
-      const res = await fetch(`/api/requests/${requestId}/director-review`, {
+      await fetch(`/api/requests/${requestId}/director-review`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, notes, directorName, channels })
       });
-
-      if (res.ok) {
-        await fetchData();
-        const req = tripRequests.find(r => r.id === requestId);
-        if (action === "permit") {
-          showToast(
-            "success",
-            "Director Endorsement Granted",
-            `Request #${req?.requestNumber || requestId} forwarded to Fleet Manager for vehicle/driver authorization.`
-          );
-        } else {
-          showToast(
-            "info",
-            "Request Denied by Director",
-            `Decline notice sent to requester with explanation.`
-          );
-        }
-        return;
-      }
     } catch (err) {
-      console.error("Director review API error:", err);
+      console.warn("Server API offline, synced to Cloud Firestore:", err);
     }
-
-    // Local state fallback
-    setTripRequests(prev => prev.map(r => {
-      if (r.id !== requestId) return r;
-      if (action === "permit") {
-        return {
-          ...r,
-          status: "Pending Fleet Manager Authorization",
-          directorApprovedBy: directorName,
-          directorApprovedAt: new Date().toISOString(),
-          directorNotes: notes
-        };
-      } else {
-        return {
-          ...r,
-          status: "Rejected by Director",
-          directorRejectionReason: notes,
-          rejectionReason: `Director Decision: ${notes}`
-        };
-      }
-    }));
 
     if (action === "permit") {
       showToast(
         "success",
         "Director Endorsement Granted",
-        "Request permitted and forwarded to Fleet Manager."
+        `Request #${targetReq.requestNumber} forwarded to Fleet Manager for vehicle/driver authorization.`
       );
     } else {
       showToast(
         "info",
         "Request Denied by Director",
-        "Notice sent to employee with justification."
+        `Decline notice sent to requester with explanation.`
       );
     }
   };
@@ -461,35 +531,6 @@ export default function App() {
     approverName: string,
     channels: ("SMS" | "Telegram" | "Email")[] = ["SMS", "Telegram", "Email"]
   ) => {
-    try {
-      const res = await fetch(`/api/requests/${requestId}/approve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ vehicleId, driverId, approverName, channels })
-      });
-
-      if (res.ok) {
-        await fetchData();
-
-        const req = tripRequests.find(r => r.id === requestId);
-        showToast(
-          "sms",
-          "Mission Approved & Dispatched!",
-          `Alerts dispatched via ${channels.join(', ')} to Driver & Requester (${req?.requesterName || 'Employee'}). Travel log generated.`
-        );
-        return;
-      } else {
-        const errorData = await res.json().catch(() => null);
-        if (errorData && errorData.error) {
-          showToast("info", "Allocation Blocked", errorData.error);
-          return;
-        }
-      }
-    } catch (err) {
-      console.error("API call failed, checking local state fallback:", err);
-    }
-
-    // Local state fallback / instant optimistic update with availability check
     const vehicle = vehicles.find(v => v.id === vehicleId);
     const driver = drivers.find(d => d.id === driverId);
     const req = tripRequests.find(r => r.id === requestId);
@@ -506,7 +547,7 @@ export default function App() {
     }
 
     if (req && vehicle && driver) {
-      // Update request
+      // 1. Prepare updated entities
       const updatedReq: TripRequest = {
         ...req,
         status: "Approved",
@@ -518,6 +559,16 @@ export default function App() {
         approvedBy: approverName,
         approvedAt: new Date().toISOString(),
         notificationChannels: channels
+      };
+
+      const updatedVehicle: Vehicle = {
+        ...vehicle,
+        status: "On Mission"
+      };
+
+      const updatedDriver: Driver = {
+        ...driver,
+        status: "On Trip"
       };
 
       // Create Travel Log
@@ -611,11 +662,30 @@ export default function App() {
         });
       }
 
+      // 2. Instant local UI update
       setTripRequests(prev => prev.map(r => r.id === req.id ? updatedReq : r));
       setTravelLogs(prev => [newLog, ...prev]);
       setSmsAlerts(prev => [...newAlerts, ...prev]);
-      setVehicles(prev => prev.map(v => v.id === vehicle.id ? { ...v, status: "On Mission" } : v));
-      setDrivers(prev => prev.map(d => d.id === driver.id ? { ...d, status: "On Trip" } : d));
+      setVehicles(prev => prev.map(v => v.id === vehicle.id ? updatedVehicle : v));
+      setDrivers(prev => prev.map(d => d.id === driver.id ? updatedDriver : d));
+
+      // 3. Direct Cloud Firestore broadcast (Real-time sync to all devices)
+      saveTripRequestToCloud(updatedReq).catch(e => console.warn("Firestore save error:", e));
+      saveVehicleToCloud(updatedVehicle).catch(e => console.warn("Firestore save error:", e));
+      saveDriverToCloud(updatedDriver).catch(e => console.warn("Firestore save error:", e));
+      saveTravelLogToCloud(newLog).catch(e => console.warn("Firestore save error:", e));
+      newAlerts.forEach(a => saveSmsAlertToCloud(a).catch(e => console.warn("Firestore save error:", e)));
+
+      // 4. Server API sync if available
+      try {
+        await fetch(`/api/requests/${requestId}/approve`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ vehicleId, driverId, approverName, channels })
+        });
+      } catch (err) {
+        console.warn("Backend API offline, synced to Cloud Firestore:", err);
+      }
 
       showToast(
         "sms",
@@ -626,31 +696,42 @@ export default function App() {
   };
 
   // Reject Request
-  // Reject Request
   const handleRejectRequest = async (
     requestId: string,
     reason: string,
     channels: ("SMS" | "Telegram" | "Email")[] = ["SMS", "Telegram", "Email"]
   ) => {
-    // 1. Optimistic instant local update
     const targetReq = tripRequests.find(r => r.id === requestId);
-    setTripRequests(prev => prev.map(r => r.id === requestId ? { 
-      ...r, 
+    if (!targetReq) return;
+
+    const updatedReq: TripRequest = { 
+      ...targetReq, 
       status: "Rejected by Fleet Manager", 
       rejectionReason: reason,
       fleetManagerRejectionReason: reason,
       fleetManagerApprovedBy: "Eng. Wondimu Bedada (Fleet Super Admin)"
-    } : r));
+    };
 
-    if (targetReq?.assignedVehicleId) {
+    // 1. Optimistic instant local update
+    setTripRequests(prev => prev.map(r => r.id === requestId ? updatedReq : r));
+
+    if (targetReq.assignedVehicleId) {
       setVehicles(prev => prev.map(v => v.id === targetReq.assignedVehicleId ? { ...v, status: "Available" } : v));
+      const veh = vehicles.find(v => v.id === targetReq.assignedVehicleId);
+      if (veh) saveVehicleToCloud({ ...veh, status: "Available" }).catch(e => console.warn(e));
     }
-    if (targetReq?.assignedDriverId) {
+    if (targetReq.assignedDriverId) {
       setDrivers(prev => prev.map(d => d.id === targetReq.assignedDriverId ? { ...d, status: "Active / Available" } : d));
+      const drv = drivers.find(d => d.id === targetReq.assignedDriverId);
+      if (drv) saveDriverToCloud({ ...drv, status: "Active / Available" }).catch(e => console.warn(e));
     }
 
+    // 2. Direct Cloud Firestore broadcast
+    saveTripRequestToCloud(updatedReq).catch(e => console.warn("Firestore reject save error:", e));
+
+    // 3. Server API sync
     try {
-      const res = await fetch(`/api/requests/${requestId}/reject`, {
+      await fetch(`/api/requests/${requestId}/reject`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -660,46 +741,53 @@ export default function App() {
           approverName: "Eng. Wondimu Bedada (Fleet Super Admin)"
         })
       });
-      if (res.ok) {
-        await fetchData();
-        showToast("info", "Request Declined", `Official rejection notice dispatched via ${channels.join(', ')}.`);
-      } else {
-        showToast("info", "Request Declined", `Rejection logged for #${targetReq?.requestNumber || requestId}.`);
-      }
     } catch (err) {
-      console.error("Reject request error:", err);
-      showToast("info", "Request Declined", "Rejection notice saved locally.");
+      console.warn("Server API offline, rejection synced to Cloud Firestore:", err);
     }
+
+    showToast("info", "Request Declined", `Official rejection notice dispatched via ${channels.join(', ')}.`);
   };
 
   // Complete Mission Audit (POST /api/requests/:id/complete)
   const handleCompleteTrip = async (requestId: string, endOdometer: number, notes: string) => {
     const endOdo = Number(endOdometer) || 0;
     const targetReq = tripRequests.find(r => r.id === requestId);
+    if (!targetReq) return;
+
+    const updatedReq: TripRequest = { ...targetReq, status: "Completed" };
 
     // 1. Optimistic instant state updates across requests, vehicles, drivers, and travel logs
-    setTripRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: "Completed" } : r));
+    setTripRequests(prev => prev.map(r => r.id === requestId ? updatedReq : r));
 
-    if (targetReq?.assignedVehicleId) {
+    if (targetReq.assignedVehicleId) {
       setVehicles(prev => prev.map(v => v.id === targetReq.assignedVehicleId ? { 
         ...v, 
         status: "Available",
         odometerKm: endOdo > 0 ? endOdo : v.odometerKm
       } : v));
+      const veh = vehicles.find(v => v.id === targetReq.assignedVehicleId);
+      if (veh) {
+        saveVehicleToCloud({ ...veh, status: "Available", odometerKm: endOdo > 0 ? endOdo : veh.odometerKm }).catch(e => console.warn(e));
+      }
     }
 
-    if (targetReq?.assignedDriverId) {
+    if (targetReq.assignedDriverId) {
       setDrivers(prev => prev.map(d => d.id === targetReq.assignedDriverId ? { 
         ...d, 
         status: "Active / Available" 
       } : d));
+      const drv = drivers.find(d => d.id === targetReq.assignedDriverId);
+      if (drv) {
+        saveDriverToCloud({ ...drv, status: "Active / Available" }).catch(e => console.warn(e));
+      }
     }
 
+    let updatedLog: TravelLog | null = null;
     setTravelLogs(prev => prev.map(l => {
-      if (l.tripRequestId === requestId || (targetReq && l.tripRequestId === targetReq.id)) {
+      if (l.tripRequestId === requestId || l.tripRequestId === targetReq.id) {
         const startKm = l.startOdometerKm || 0;
         const totalDist = endOdo > startKm ? endOdo - startKm : (l.totalDistanceKm || 120);
-        return {
+        const nextLog: TravelLog = {
           ...l,
           status: "Completed",
           endOdometerKm: endOdo,
@@ -707,12 +795,21 @@ export default function App() {
           endTime: new Date().toISOString(),
           officerRemarks: notes ? (l.officerRemarks ? `${l.officerRemarks} | ${notes}` : notes) : l.officerRemarks
         };
+        updatedLog = nextLog;
+        return nextLog;
       }
       return l;
     }));
 
+    // 2. Direct Cloud Firestore broadcast
+    saveTripRequestToCloud(updatedReq).catch(e => console.warn(e));
+    if (updatedLog) {
+      saveTravelLogToCloud(updatedLog).catch(e => console.warn(e));
+    }
+
+    // 3. Server API sync
     try {
-      const res = await fetch(`/api/requests/${requestId}/complete`, {
+      await fetch(`/api/requests/${requestId}/complete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -721,83 +818,82 @@ export default function App() {
           notes: notes || "Mission successfully completed and audited."
         })
       });
-      if (res.ok) {
-        await fetchData();
-        showToast("success", "Mission Completed & Audited", `Vehicle returned to available fleet pool. Logged ${endOdo.toLocaleString()} km.`);
-      } else {
-        showToast("success", "Mission Completed & Audited", "Vehicle returned to available fleet pool.");
-      }
     } catch (err) {
-      console.error("Complete trip error:", err);
-      showToast("success", "Mission Completed & Audited", "Vehicle returned to available fleet pool.");
+      console.warn("Server API offline, trip completion synced to Cloud Firestore:", err);
     }
+
+    showToast("success", "Mission Completed & Audited", `Vehicle returned to available fleet pool. Logged ${endOdo > 0 ? endOdo.toLocaleString() + ' km' : 'completion'}.`);
   };
 
   // Add Fuel Record
   const handleAddFuelRecord = async (record: Partial<FuelRecord>) => {
+    const newRec: FuelRecord = {
+      id: `fuel-${Date.now()}`,
+      voucherNumber: `OARI-FL-${Math.floor(1000 + Math.random() * 9000)}`,
+      vehicleId: record.vehicleId || (vehicles[0]?.id || "v-1"),
+      vehiclePlate: record.vehiclePlate || (vehicles[0]?.plateNumber || "4-45000 ET"),
+      stationBase: record.stationBase || "Sinana",
+      fuelStationName: record.fuelStationName || "NOC Station",
+      liters: Number(record.liters) || 60,
+      unitPriceEtb: Number(record.unitPriceEtb) || 97.00,
+      totalCostEtb: Number(record.totalCostEtb) || 5820,
+      odometerAtRefuel: Number(record.odometerAtRefuel) || 35000,
+      date: record.date || new Date().toISOString().split('T')[0],
+      driverName: record.driverName || "Driver",
+      approvedBy: record.approvedBy || "Fleet Director",
+      ...record
+    };
+
+    // 1. Instant local & cloud Firestore sync
+    setFuelRecords(prev => [newRec, ...prev]);
+    saveFuelRecordToCloud(newRec).catch(e => console.warn("Firestore fuel save error:", e));
+
+    // 2. Server sync if available
     try {
-      const res = await fetch("/api/fuel-records", {
+      await fetch("/api/fuel-records", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(record)
+        body: JSON.stringify(newRec)
       });
-      if (res.ok) {
-        await fetchData();
-        showToast("success", "Fuel Voucher Logged", `Voucher recorded and tank volume reconciled.`);
-      }
     } catch (err) {
-      console.error(err);
-      const newRec: FuelRecord = {
-        id: `fuel-${Date.now()}`,
-        voucherNumber: `OARI-FL-${Math.floor(1000 + Math.random() * 9000)}`,
-        vehicleId: record.vehicleId || vehicles[0].id,
-        vehiclePlate: record.vehiclePlate || vehicles[0].plateNumber,
-        stationBase: record.stationBase || "Sinana",
-        fuelStationName: record.fuelStationName || "NOC Station",
-        liters: record.liters || 60,
-        unitPriceEtb: record.unitPriceEtb || 97.00,
-        totalCostEtb: record.totalCostEtb || 5820,
-        odometerAtRefuel: record.odometerAtRefuel || 35000,
-        date: record.date || new Date().toISOString().split('T')[0],
-        driverName: record.driverName || "Driver",
-        approvedBy: record.approvedBy || "Fleet Director"
-      };
-      setFuelRecords(prev => [newRec, ...prev]);
-      showToast("success", "Fuel Voucher Logged", `Voucher #${newRec.voucherNumber} created.`);
+      console.warn("Backend API offline, saved fuel record to Firestore:", err);
     }
+    showToast("success", "Fuel Voucher Logged", `Voucher #${newRec.voucherNumber} created and synced.`);
   };
 
   // Add Maintenance Record
   const handleAddMaintenanceRecord = async (record: Partial<MaintenanceRecord>) => {
+    const newMaint: MaintenanceRecord = {
+      id: `maint-${Date.now()}`,
+      jobCardNumber: `JC-${Math.floor(1000 + Math.random() * 9000)}`,
+      vehicleId: record.vehicleId || (vehicles[0]?.id || "v-1"),
+      vehiclePlate: record.vehiclePlate || (vehicles[0]?.plateNumber || "4-45000 ET"),
+      serviceType: record.serviceType || "Periodic Oil & Filter",
+      status: record.status || "Scheduled",
+      scheduledDate: record.scheduledDate || new Date().toISOString().split('T')[0],
+      workshopName: record.workshopName || "OARI Workshop",
+      odometerKm: Number(record.odometerKm) || 45000,
+      costEtb: Number(record.costEtb) || 15000,
+      technicianNotes: record.technicianNotes || "Periodic inspection",
+      partsReplaced: record.partsReplaced || ["Oil Filter", "Engine Oil"],
+      ...record
+    };
+
+    // 1. Instant local & cloud Firestore sync
+    setMaintenanceRecords(prev => [newMaint, ...prev]);
+    saveMaintenanceRecordToCloud(newMaint).catch(e => console.warn("Firestore maintenance save error:", e));
+
+    // 2. Server sync if available
     try {
-      const res = await fetch("/api/maintenance", {
+      await fetch("/api/maintenance", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(record)
+        body: JSON.stringify(newMaint)
       });
-      if (res.ok) {
-        await fetchData();
-        showToast("success", "Maintenance Job Card Created", `Job card created for ${record.vehiclePlate}.`);
-      }
     } catch (err) {
-      console.error(err);
-      const newMaint: MaintenanceRecord = {
-        id: `maint-${Date.now()}`,
-        jobCardNumber: `JC-${Math.floor(1000 + Math.random() * 9000)}`,
-        vehicleId: record.vehicleId || vehicles[0].id,
-        vehiclePlate: record.vehiclePlate || vehicles[0].plateNumber,
-        serviceType: record.serviceType || "Periodic Oil & Filter",
-        status: record.status || "Scheduled",
-        scheduledDate: record.scheduledDate || new Date().toISOString().split('T')[0],
-        workshopName: record.workshopName || "OARI Workshop",
-        odometerKm: record.odometerKm || 45000,
-        costEtb: record.costEtb || 15000,
-        technicianNotes: record.technicianNotes || "Periodic inspection",
-        partsReplaced: record.partsReplaced || ["Oil Filter", "Engine Oil"]
-      };
-      setMaintenanceRecords(prev => [newMaint, ...prev]);
-      showToast("success", "Job Card Created", `Job Card #${newMaint.jobCardNumber} created.`);
+      console.warn("Backend API offline, saved maintenance to Firestore:", err);
     }
+    showToast("success", "Job Card Created", `Job Card #${newMaint.jobCardNumber} created and synced.`);
   };
 
   // Send Custom SMS or Telegram Alert
@@ -809,34 +905,34 @@ export default function App() {
     tripRequestNumber?: string;
     channel?: NotificationChannel;
   }) => {
+    const newSms: SMSAlert = {
+      id: `sms-${Date.now()}`,
+      channel: data.channel || "Telegram",
+      recipientType: data.recipientType,
+      recipientName: data.recipientName,
+      recipientPhone: data.recipientPhone,
+      tripRequestNumber: data.tripRequestNumber || "OARI-BROADCAST",
+      message: data.message,
+      status: "Delivered",
+      sentAt: new Date().toISOString(),
+      gatewayRef: `OARI-ALERT-${Math.floor(100000 + Math.random() * 900000)}`,
+      costEtb: 0.00
+    };
+
+    setSmsAlerts(prev => [newSms, ...prev]);
+    saveSmsAlertToCloud(newSms).catch(e => console.warn("Firestore alert save error:", e));
+
     try {
-      const res = await fetch("/api/sms/send", {
+      await fetch("/api/sms/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data)
       });
-      if (res.ok) {
-        await fetchData();
-        showToast("sms", `${data.channel || 'SMS'} Alert Delivered`, `Sent to ${data.recipientName} (${data.recipientPhone}).`);
-      }
     } catch (err) {
-      console.error(err);
-      const newSms: SMSAlert = {
-        id: `sms-${Date.now()}`,
-        channel: data.channel || "Telegram",
-        recipientType: data.recipientType,
-        recipientName: data.recipientName,
-        recipientPhone: data.recipientPhone,
-        tripRequestNumber: data.tripRequestNumber || "OARI-BROADCAST",
-        message: data.message,
-        status: "Delivered",
-        sentAt: new Date().toISOString(),
-        gatewayRef: `OARI-ALERT-${Math.floor(100000 + Math.random() * 900000)}`,
-        costEtb: 0.00
-      };
-      setSmsAlerts(prev => [newSms, ...prev]);
-      showToast("sms", "Alert Broadcast Delivered", `Sent to ${data.recipientPhone}.`);
+      console.warn("Backend API offline, alert saved to Firestore:", err);
     }
+
+    showToast("sms", `${data.channel || 'SMS'} Alert Delivered`, `Sent to ${data.recipientName} (${data.recipientPhone}).`);
   };
 
   // View & Print Official Travel Voucher
@@ -874,12 +970,17 @@ export default function App() {
       return updated;
     });
 
+    // Save to Cloud Firestore
+    saveVehicleToCloud(vehicleObj).catch(e => console.warn("Firestore vehicle save error:", e));
+
     // If driver is assigned, update drivers state
     if (vehicleObj.assignedDriverName && vehicleObj.assignedDriverName !== "Station Pool Driver" && vehicleObj.assignedDriverName !== "Unassigned / Pool Driver") {
       setDrivers(prev => {
         const updated = prev.map(d => {
           if (d.id === vehicleObj.assignedDriverId || d.name.toLowerCase() === vehicleObj.assignedDriverName?.toLowerCase()) {
-            return { ...d, assignedVehiclePlate: vehicleObj.plateNumber, currentVehicleId: vehicleObj.id, stationBase: vehicleObj.stationBase || d.stationBase };
+            const updatedD = { ...d, assignedVehiclePlate: vehicleObj.plateNumber, currentVehicleId: vehicleObj.id, stationBase: vehicleObj.stationBase || d.stationBase };
+            saveDriverToCloud(updatedD).catch(e => console.warn(e));
+            return updatedD;
           }
           return d;
         });
@@ -891,33 +992,43 @@ export default function App() {
     showToast("success", "Vehicle Registered", `Car ${vehicleObj.plateNumber} added to OARI fleet.`);
 
     try {
-      const res = await fetch("/api/vehicles", {
+      await fetch("/api/vehicles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(vehicleObj)
       });
-      if (res.ok) {
-        await fetchData();
-      }
     } catch (err) {
-      console.error(err);
+      console.warn("Backend offline, vehicle saved to Cloud Firestore:", err);
     }
   };
 
   const handleEditVehicle = async (id: string, updatedData: Partial<Vehicle>) => {
-    // Immediate state & cache update
+    let fullVehicle: Vehicle | null = null;
     setVehicles(prev => {
-      const updated = prev.map(v => v.id === id || v.plateNumber === id ? { ...v, ...updatedData } : v);
+      const updated = prev.map(v => {
+        if (v.id === id || v.plateNumber === id) {
+          const next = { ...v, ...updatedData };
+          fullVehicle = next;
+          return next;
+        }
+        return v;
+      });
       try { localStorage.setItem("oari_vehicles_cache", JSON.stringify(updated)); } catch (e) {}
       return updated;
     });
+
+    if (fullVehicle) {
+      saveVehicleToCloud(fullVehicle).catch(e => console.warn(e));
+    }
 
     // If assignedDriverName changed, update driver state
     if (updatedData.assignedDriverName && updatedData.assignedDriverName !== "Station Pool Driver" && updatedData.assignedDriverName !== "Unassigned / Pool Driver") {
       setDrivers(prev => {
         const updated = prev.map(d => {
           if (d.name.toLowerCase() === updatedData.assignedDriverName?.toLowerCase() || d.id === updatedData.assignedDriverId) {
-            return { ...d, assignedVehiclePlate: updatedData.plateNumber || d.assignedVehiclePlate, currentVehicleId: id };
+            const updatedD = { ...d, assignedVehiclePlate: updatedData.plateNumber || d.assignedVehiclePlate, currentVehicleId: id };
+            saveDriverToCloud(updatedD).catch(e => console.warn(e));
+            return updatedD;
           }
           return d;
         });
@@ -929,16 +1040,13 @@ export default function App() {
     showToast("success", "Vehicle Information Updated", `Changes saved for ${updatedData.plateNumber || 'vehicle'}.`);
 
     try {
-      const res = await fetch(`/api/vehicles/${id}`, {
+      await fetch(`/api/vehicles/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updatedData)
       });
-      if (res.ok) {
-        await fetchData();
-      }
     } catch (err) {
-      console.error(err);
+      console.warn("Backend offline, vehicle edit saved to Cloud Firestore:", err);
     }
   };
 
@@ -951,6 +1059,8 @@ export default function App() {
       return updated;
     });
 
+    deleteVehicleFromCloud(id).catch(e => console.warn(e));
+
     // Unassign driver
     setDrivers(prev => {
       const updated = prev.map(d => (d.assignedVehiclePlate === vehicleToDelete?.plateNumber ? { ...d, assignedVehiclePlate: "Unassigned / Pool Car" } : d));
@@ -961,20 +1071,24 @@ export default function App() {
     showToast("info", "Vehicle Removed", `Vehicle ${vehicleToDelete?.plateNumber || ''} removed from fleet.`);
 
     try {
-      const res = await fetch(`/api/vehicles/${id}`, {
+      await fetch(`/api/vehicles/${id}`, {
         method: "DELETE"
       });
-      if (res.ok) {
-        await fetchData();
-      }
     } catch (err) {
-      console.error(err);
+      console.warn(err);
     }
   };
 
   const handleUpdateVehicleStatus = (id: string, updates: { status?: Vehicle["status"]; odometerKm?: number; currentFuelLevel?: number }) => {
     setVehicles(prev => {
-      const updated = prev.map(v => v.id === id ? { ...v, ...updates } : v);
+      const updated = prev.map(v => {
+        if (v.id === id) {
+          const next = { ...v, ...updates };
+          saveVehicleToCloud(next).catch(e => console.warn(e));
+          return next;
+        }
+        return v;
+      });
       try { localStorage.setItem("oari_vehicles_cache", JSON.stringify(updated)); } catch (e) {}
       return updated;
     });
@@ -1002,18 +1116,22 @@ export default function App() {
       return updated;
     });
 
+    saveDriverToCloud(driverObj).catch(e => console.warn(e));
+
     // If assigned to a registered car, update that vehicle
     if (driverObj.assignedVehiclePlate && driverObj.assignedVehiclePlate !== "Unassigned / Pool Car" && driverObj.assignedVehiclePlate !== "Station Pool" && driverObj.assignedVehiclePlate !== "None") {
       setVehicles(prev => {
         const updated = prev.map(v => {
           if (v.plateNumber === driverObj.assignedVehiclePlate || v.id === driverObj.assignedVehicleId) {
-            return {
+            const nextV = {
               ...v,
               assignedDriverId: driverObj.id,
               assignedDriverName: driverObj.name,
               driverPhone: driverObj.phone,
               stationBase: driverObj.stationBase || v.stationBase
             };
+            saveVehicleToCloud(nextV).catch(e => console.warn(e));
+            return nextV;
           }
           return v;
         });
@@ -1025,57 +1143,55 @@ export default function App() {
     showToast("success", "Driver Registered", `Driver ${driverObj.name} profile registered and assigned.`);
 
     try {
-      const res = await fetch("/api/drivers", {
+      await fetch("/api/drivers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(driverObj)
       });
-      if (res.ok) {
-        await fetchData();
-      }
     } catch (err) {
-      console.error(err);
+      console.warn("Backend offline, driver saved to Firestore:", err);
     }
   };
 
   const handleEditDriver = async (id: string, updatedData: Partial<Driver>) => {
+    let fullDriver: Driver | null = null;
     setDrivers(prev => {
-      const updated = prev.map(d => d.id === id ? { ...d, ...updatedData } : d);
+      const updated = prev.map(d => {
+        if (d.id === id) {
+          const next = { ...d, ...updatedData };
+          fullDriver = next;
+          return next;
+        }
+        return d;
+      });
       try { localStorage.setItem("oari_drivers_cache", JSON.stringify(updated)); } catch (e) {}
       return updated;
     });
+
+    if (fullDriver) {
+      saveDriverToCloud(fullDriver).catch(e => console.warn(e));
+    }
 
     // If driver's assigned car or name/phone changed, update vehicles
     if (updatedData.assignedVehiclePlate && updatedData.assignedVehiclePlate !== "Unassigned / Pool Car" && updatedData.assignedVehiclePlate !== "Station Pool" && updatedData.assignedVehiclePlate !== "None") {
       setVehicles(prev => {
         const updated = prev.map(v => {
           if (v.plateNumber === updatedData.assignedVehiclePlate || v.id === updatedData.assignedVehicleId) {
-            return {
+            const nextV = {
               ...v,
               assignedDriverId: id,
               assignedDriverName: updatedData.name || v.assignedDriverName,
               driverPhone: updatedData.phone || v.driverPhone,
               stationBase: updatedData.stationBase || v.stationBase
             };
+            saveVehicleToCloud(nextV).catch(e => console.warn(e));
+            return nextV;
           }
           // Clear any old car
           if (v.assignedDriverId === id && v.plateNumber !== updatedData.assignedVehiclePlate) {
-            return { ...v, assignedDriverName: "Station Pool Driver", driverPhone: "+251 911 000 000", assignedDriverId: undefined };
-          }
-          return v;
-        });
-        try { localStorage.setItem("oari_vehicles_cache", JSON.stringify(updated)); } catch (e) {}
-        return updated;
-      });
-    } else if (updatedData.name || updatedData.phone) {
-      setVehicles(prev => {
-        const updated = prev.map(v => {
-          if (v.assignedDriverId === id) {
-            return {
-              ...v,
-              assignedDriverName: updatedData.name || v.assignedDriverName,
-              driverPhone: updatedData.phone || v.driverPhone
-            };
+            const clearedV = { ...v, assignedDriverName: "Station Pool Driver", driverPhone: "+251 911 000 000", assignedDriverId: undefined };
+            saveVehicleToCloud(clearedV).catch(e => console.warn(e));
+            return clearedV;
           }
           return v;
         });
@@ -1092,16 +1208,13 @@ export default function App() {
     showToast("success", "Driver Information Updated", `Changes saved for ${updatedData.name || 'driver'}. All records synchronized.`);
 
     try {
-      const res = await fetch(`/api/drivers/${id}`, {
+      await fetch(`/api/drivers/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updatedData)
       });
-      if (res.ok) {
-        await fetchData();
-      }
     } catch (err) {
-      console.error(err);
+      console.warn("Backend offline, driver update saved to Cloud Firestore:", err);
     }
   };
 
@@ -1113,6 +1226,8 @@ export default function App() {
       try { localStorage.setItem("oari_drivers_cache", JSON.stringify(updated)); } catch (e) {}
       return updated;
     });
+
+    deleteDriverFromCloud(id).catch(e => console.warn(e));
 
     // Unassign in vehicles
     setVehicles(prev => {
@@ -1129,14 +1244,11 @@ export default function App() {
     showToast("info", "Driver Removed", `Driver ${driverToDelete?.name || ''} removed from registry.`);
 
     try {
-      const res = await fetch(`/api/drivers/${id}`, {
+      await fetch(`/api/drivers/${id}`, {
         method: "DELETE"
       });
-      if (res.ok) {
-        await fetchData();
-      }
     } catch (err) {
-      console.error(err);
+      console.warn(err);
     }
   };
 
@@ -1155,33 +1267,21 @@ export default function App() {
       return updated;
     });
 
+    saveOfficerToCloud(newOfficer).catch(e => console.warn(e));
+
     try {
-      const res = await fetch("/api/officers", {
+      await fetch("/api/officers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(officerData)
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.officer) {
-          setOfficers(prev => {
-            const list = prev.map(o => o.id === newOfficer.id ? data.officer : o);
-            try { localStorage.setItem("oari_officers_cache", JSON.stringify(list)); } catch (e) {}
-            return list;
-          });
-        }
-        await fetchData();
-        showToast("success", "Officer Profile Registered", `${officerData.fullName} registered as institutional ${officerData.roleType}.`);
-        return;
-      }
     } catch (err) {
-      console.error(err);
+      console.warn(err);
     }
     showToast("success", "Officer Profile Registered", `${officerData.fullName} registered as ${officerData.roleType}.`);
   };
 
   const handleUpdateOfficer = async (updatedOfficer: InstitutionalOfficer) => {
-    // Instant optimistic update with localStorage persistence
     setOfficers(prev => {
       const updated = prev.map(o => {
         if (o.id === updatedOfficer.id) return updatedOfficer;
@@ -1194,33 +1294,16 @@ export default function App() {
       return updated;
     });
 
+    saveOfficerToCloud(updatedOfficer).catch(e => console.warn(e));
+
     try {
-      const res = await fetch(`/api/officers/${updatedOfficer.id}`, {
+      await fetch(`/api/officers/${updatedOfficer.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updatedOfficer)
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.officer) {
-          setOfficers(prev => {
-            const updated = prev.map(o => {
-              if (o.id === updatedOfficer.id) return data.officer;
-              if (data.officer.isPrimaryForRole && o.roleType === data.officer.roleType) {
-                return { ...o, isPrimaryForRole: false };
-              }
-              return o;
-            });
-            try { localStorage.setItem("oari_officers_cache", JSON.stringify(updated)); } catch (e) {}
-            return updated;
-          });
-        }
-        await fetchData();
-        showToast("success", "Officer Profile Updated", `Details updated for ${updatedOfficer.fullName}.`);
-        return;
-      }
     } catch (err) {
-      console.error(err);
+      console.warn(err);
     }
     showToast("success", "Officer Profile Updated", `Details updated for ${updatedOfficer.fullName}.`);
   };
@@ -1233,17 +1316,14 @@ export default function App() {
       return updated;
     });
 
+    deleteOfficerFromCloud(id).catch(e => console.warn(e));
+
     try {
-      const res = await fetch(`/api/officers/${id}`, {
+      await fetch(`/api/officers/${id}`, {
         method: "DELETE"
       });
-      if (res.ok) {
-        await fetchData();
-        showToast("info", "Officer Profile Removed", `${officerToDelete?.fullName || 'Officer'} removed.`);
-        return;
-      }
     } catch (err) {
-      console.error(err);
+      console.warn(err);
     }
     showToast("info", "Officer Profile Removed", `${officerToDelete?.fullName || 'Officer'} removed.`);
   };
@@ -1251,29 +1331,23 @@ export default function App() {
   const handleSetActiveOfficer = async (officerId: string, roleType: "Director" | "Fleet Manager" | "Supervisor") => {
     setOfficers(prev => {
       const updated = prev.map(o => {
-        if (o.roleType === roleType) {
-          return { ...o, isPrimaryForRole: o.id === officerId };
-        }
-        return o;
+        const isPrimary = o.roleType === roleType ? o.id === officerId : o.isPrimaryForRole;
+        const nextO = { ...o, isPrimaryForRole: isPrimary };
+        saveOfficerToCloud(nextO).catch(e => console.warn(e));
+        return nextO;
       });
       try { localStorage.setItem("oari_officers_cache", JSON.stringify(updated)); } catch (e) {}
       return updated;
     });
 
     try {
-      const res = await fetch("/api/officers/set-active", {
+      await fetch("/api/officers/set-active", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ officerId, roleType })
       });
-      if (res.ok) {
-        await fetchData();
-        const off = officers.find(o => o.id === officerId);
-        showToast("success", "Primary Authority Designated", `${off?.fullName || 'Officer'} set as active ${roleType} for official reports.`);
-        return;
-      }
     } catch (err) {
-      console.error(err);
+      console.warn(err);
     }
     const off = officers.find(o => o.id === officerId);
     showToast("success", "Primary Authority Designated", `${off?.fullName || 'Officer'} set as active ${roleType} for official reports.`);

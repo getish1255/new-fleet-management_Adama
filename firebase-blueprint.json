@@ -1,0 +1,198 @@
+{
+  "entities": {
+    "TripRequest": {
+      "title": "TripRequest",
+      "description": "Institutional vehicle booking request from employee/researcher",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "requestNumber": { "type": "string" },
+        "requesterName": { "type": "string" },
+        "requesterTitle": { "type": "string" },
+        "department": { "type": "string" },
+        "requesterPhone": { "type": "string" },
+        "requesterEmail": { "type": "string" },
+        "requesterTelegram": { "type": "string" },
+        "stationBase": { "type": "string" },
+        "tripCategory": { "type": "string" },
+        "origin": { "type": "string" },
+        "destination": { "type": "string" },
+        "departureDate": { "type": "string" },
+        "returnDate": { "type": "string" },
+        "purpose": { "type": "string" },
+        "passengerCount": { "type": "number" },
+        "cargoDescription": { "type": "string" },
+        "cargoWeightKg": { "type": "number" },
+        "urgency": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "estimatedKm": { "type": "number" },
+        "estimatedFuelLiters": { "type": "number" }
+      },
+      "required": ["id", "requestNumber", "requesterName", "department", "origin", "destination", "status"]
+    },
+    "Vehicle": {
+      "title": "Vehicle",
+      "description": "Institutional fleet vehicle asset",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "plateNumber": { "type": "string" },
+        "code": { "type": "string" },
+        "model": { "type": "string" },
+        "type": { "type": "string" },
+        "stationBase": { "type": "string" },
+        "year": { "type": "number" },
+        "fuelType": { "type": "string" },
+        "fuelTankCapacity": { "type": "number" },
+        "currentFuelLevel": { "type": "number" },
+        "odometerKm": { "type": "number" },
+        "status": { "type": "string" },
+        "nextServiceKm": { "type": "number" },
+        "lastServiceDate": { "type": "string" }
+      },
+      "required": ["id", "plateNumber", "model", "status", "stationBase"]
+    },
+    "Driver": {
+      "title": "Driver",
+      "description": "Official institutional driver",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "licenseNumber": { "type": "string" },
+        "stationBase": { "type": "string" },
+        "experienceYears": { "type": "number" },
+        "rating": { "type": "number" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "name", "phone", "status"]
+    },
+    "InstitutionalOfficer": {
+      "title": "InstitutionalOfficer",
+      "description": "Institutional reviewing/approving officer",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "roleType": { "type": "string" },
+        "fullName": { "type": "string" },
+        "officialTitle": { "type": "string" },
+        "department": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "email": { "type": "string" },
+        "telegramHandle": { "type": "string" }
+      },
+      "required": ["id", "roleType", "fullName", "department"]
+    },
+    "TravelLog": {
+      "title": "TravelLog",
+      "description": "Vehicle dispatch travel log and trip ticket",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "logNumber": { "type": "string" },
+        "tripRequestId": { "type": "string" },
+        "vehicleId": { "type": "string" },
+        "vehiclePlate": { "type": "string" },
+        "driverName": { "type": "string" },
+        "requesterName": { "type": "string" },
+        "origin": { "type": "string" },
+        "destination": { "type": "string" },
+        "startOdometerKm": { "type": "number" },
+        "startTime": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "logNumber", "tripRequestId", "vehiclePlate", "driverName", "status"]
+    },
+    "FuelRecord": {
+      "title": "FuelRecord",
+      "description": "Fuel voucher refill record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "voucherNumber": { "type": "string" },
+        "vehicleId": { "type": "string" },
+        "vehiclePlate": { "type": "string" },
+        "stationBase": { "type": "string" },
+        "fuelStationName": { "type": "string" },
+        "liters": { "type": "number" },
+        "unitPriceEtb": { "type": "number" },
+        "totalCostEtb": { "type": "number" },
+        "odometerAtRefuel": { "type": "number" },
+        "date": { "type": "string" },
+        "driverName": { "type": "string" },
+        "approvedBy": { "type": "string" }
+      },
+      "required": ["id", "voucherNumber", "vehiclePlate", "liters", "totalCostEtb"]
+    },
+    "MaintenanceRecord": {
+      "title": "MaintenanceRecord",
+      "description": "Vehicle service and maintenance workshop record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "jobCardNumber": { "type": "string" },
+        "vehicleId": { "type": "string" },
+        "vehiclePlate": { "type": "string" },
+        "serviceType": { "type": "string" },
+        "status": { "type": "string" },
+        "scheduledDate": { "type": "string" },
+        "workshopName": { "type": "string" },
+        "odometerKm": { "type": "number" },
+        "costEtb": { "type": "number" }
+      },
+      "required": ["id", "jobCardNumber", "vehiclePlate", "serviceType", "status"]
+    },
+    "NotificationAlert": {
+      "title": "NotificationAlert",
+      "description": "SMS and Telegram notification alert log",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "recipientType": { "type": "string" },
+        "recipientName": { "type": "string" },
+        "recipientPhone": { "type": "string" },
+        "tripRequestNumber": { "type": "string" },
+        "message": { "type": "string" },
+        "status": { "type": "string" },
+        "sentAt": { "type": "string" }
+      },
+      "required": ["id", "recipientName", "recipientPhone", "message", "status"]
+    }
+  },
+  "firestore": {
+    "/requests/{requestId}": {
+      "schema": { "$ref": "#/entities/TripRequest" },
+      "description": "Institutional trip requests and approvals across devices"
+    },
+    "/vehicles/{vehicleId}": {
+      "schema": { "$ref": "#/entities/Vehicle" },
+      "description": "Fleet vehicle assets"
+    },
+    "/drivers/{driverId}": {
+      "schema": { "$ref": "#/entities/Driver" },
+      "description": "Institutional drivers"
+    },
+    "/officers/{officerId}": {
+      "schema": { "$ref": "#/entities/InstitutionalOfficer" },
+      "description": "Institutional approving officers and accounts"
+    },
+    "/travelLogs/{logId}": {
+      "schema": { "$ref": "#/entities/TravelLog" },
+      "description": "Travel logs and trip tickets"
+    },
+    "/fuelRecords/{recordId}": {
+      "schema": { "$ref": "#/entities/FuelRecord" },
+      "description": "Fuel refill vouchers and logs"
+    },
+    "/maintenanceRecords/{recordId}": {
+      "schema": { "$ref": "#/entities/MaintenanceRecord" },
+      "description": "Maintenance job cards and records"
+    },
+    "/smsAlerts/{alertId}": {
+      "schema": { "$ref": "#/entities/NotificationAlert" },
+      "description": "SMS and Telegram alert logs"
+    }
+  }
+}
