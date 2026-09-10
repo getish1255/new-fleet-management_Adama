@@ -39,6 +39,25 @@ import {
 import { TripRequest, Vehicle, Driver, TravelLog, Role, NotificationChannel, TripBookingCategory, TripStatus, InstitutionalOfficer } from "../types";
 import { ROLE_CONFIGS } from "../data/roles";
 
+export const DEFAULT_CAR_DRIVER_PAIRS: { [plate: string]: string } = {
+  "4-00492": "Adunyaa Tafari",
+  "4-00493": "Midhaqsaa Amsaalu",
+  "4-00050": "Waaqumaa Margaa",
+  "4-00052": "Gizaaw Biru",
+  "4-02264": "Fiqree Tafaraa",
+  "4-02203": "Garamuu Rabumaa",
+  "4-03974": "Daawit Hoorsaa",
+  "4-04404": "Gamadaa Fiqaadu",
+  "4-04185": "Tamasgeen Taafasaa",
+  "4-0922":  "Dr Lammaa Abaraa",
+  "4-06797": "Aklilu Abaja",
+  "4-07677": "Araarsaa Tasfaa",
+  "4-08155": "Ashanaafi Bayana",
+  "4-07056": "Gamachu Gaaranfas",
+  "4-07585": "Mana Kusaa",
+  "4-08136": "Ayalaa Itaanaa"
+};
+
 interface ApprovalTravelLogsProps {
   requests: TripRequest[];
   vehicles: Vehicle[];
@@ -46,6 +65,7 @@ interface ApprovalTravelLogsProps {
   travelLogs: TravelLog[];
   officers?: InstitutionalOfficer[];
   role: Role;
+  initialSubTab?: "pending" | "all_requests" | "my_stages" | "stage1" | "stage2" | "active" | "all_logs" | "rejected";
   onDirectorReview?: (requestId: string, action: "permit" | "deny", notes: string, directorName: string, channels?: NotificationChannel[]) => void;
   onApproveRequest: (requestId: string, vehicleId: string, driverId: string, approverName: string, channels?: NotificationChannel[]) => void;
   onRejectRequest: (requestId: string, reason: string, channels?: NotificationChannel[]) => void;
@@ -53,6 +73,7 @@ interface ApprovalTravelLogsProps {
   onViewVoucher: (request: TripRequest, travelLog?: TravelLog) => void;
   onOpenRoleAuth?: (targetRole?: Role) => void;
   onOpenOfficerModal?: () => void;
+  onOpenNewTripModal?: () => void;
 }
 
 export const ApprovalTravelLogs: React.FC<ApprovalTravelLogsProps> = ({
@@ -62,28 +83,40 @@ export const ApprovalTravelLogs: React.FC<ApprovalTravelLogsProps> = ({
   travelLogs = [],
   officers = [],
   role = "Fleet Manager (Super Admin)",
+  initialSubTab,
   onDirectorReview,
   onApproveRequest,
   onRejectRequest,
   onCompleteTrip,
   onViewVoucher,
   onOpenRoleAuth,
-  onOpenOfficerModal
+  onOpenOfficerModal,
+  onOpenNewTripModal
 }) => {
   const safeRequests = Array.isArray(requests) ? requests : [];
   const safeVehicles = Array.isArray(vehicles) ? vehicles : [];
   const safeDrivers = Array.isArray(drivers) ? drivers : [];
   const safeTravelLogs = Array.isArray(travelLogs) ? travelLogs : [];
 
-  // Default tab based on role
-  const defaultTab = role === "Immediate Director / Supervisor" ? "stage1" : role === "Researcher / Employee" ? "my_stages" : "stage2";
-  const [activeSubTab, setActiveSubTab] = useState<"all_requests" | "my_stages" | "stage1" | "stage2" | "active" | "all_logs" | "rejected">(defaultTab);
+  // Default tab based on role or prop
+  const defaultTab = initialSubTab || (role === "Researcher / Employee" ? "my_stages" : "pending");
+  const [activeSubTab, setActiveSubTab] = useState<"pending" | "all_requests" | "my_stages" | "stage1" | "stage2" | "active" | "all_logs" | "rejected">(defaultTab);
+  const [pendingFilter, setPendingFilter] = useState<"all" | "stage1" | "stage2">("all");
 
-  // Synchronize active tab when role changes
+  // Synchronize active tab when initialSubTab changes
   React.useEffect(() => {
-    const tab = role === "Immediate Director / Supervisor" ? "stage1" : role === "Researcher / Employee" ? "my_stages" : "stage2";
-    setActiveSubTab(tab);
-  }, [role]);
+    if (initialSubTab) {
+      setActiveSubTab(initialSubTab);
+    }
+  }, [initialSubTab]);
+
+  // Synchronize active tab when role changes only if no initialSubTab was supplied
+  React.useEffect(() => {
+    if (!initialSubTab) {
+      const tab = role === "Researcher / Employee" ? "my_stages" : "pending";
+      setActiveSubTab(tab);
+    }
+  }, [role, initialSubTab]);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<"ALL" | TripBookingCategory>("ALL");
@@ -145,10 +178,10 @@ export const ApprovalTravelLogs: React.FC<ApprovalTravelLogsProps> = ({
     });
   };
 
-  // Helper: Check if vehicle is strictly Available and not assigned to an active mission
+  // Helper: Check if vehicle is available and not assigned to an active conflicting mission
   const isVehicleAvailable = (v?: Vehicle | null, currentReqId?: string): boolean => {
     if (!v) return false;
-    if (v.status !== "Available") return false;
+    if (v.status === "In Maintenance") return false;
     const isAssignedToActive = safeRequests.some(r => 
       r.id !== currentReqId && 
       r.assignedVehicleId === v.id && 
@@ -157,11 +190,10 @@ export const ApprovalTravelLogs: React.FC<ApprovalTravelLogsProps> = ({
     return !isAssignedToActive;
   };
 
-  // Helper: Check if driver is strictly Active/Available and not assigned to an active mission
+  // Helper: Check if driver is active and not assigned to an active conflicting mission
   const isDriverAvailable = (d?: Driver | null, currentReqId?: string): boolean => {
     if (!d) return false;
-    const isStatusAvail = d.status === "Active / Available";
-    if (!isStatusAvail) return false;
+    if (d.status === "On Leave") return false;
     const isAssignedToActive = safeRequests.some(r => 
       r.id !== currentReqId && 
       r.assignedDriverId === d.id && 
@@ -212,19 +244,23 @@ export const ApprovalTravelLogs: React.FC<ApprovalTravelLogsProps> = ({
     setSelectedChannels(["Telegram", "SMS", "Email"]);
     setPreviewTab("Telegram");
     
-    // Choose ONLY strictly available vehicles
+    // Choose available vehicle
     const availableVehs = safeVehicles.filter(v => isVehicleAvailable(v, req.id));
-    const availableDrivers = safeDrivers.filter(d => isDriverAvailable(d, req.id));
-
-    const firstAvailVeh = availableVehs[0] || null;
-    const initialVehicleId = firstAvailVeh ? firstAvailVeh.id : (safeVehicles.find(v => isVehicleAvailable(v, req.id))?.id || "");
+    const firstAvailVeh = availableVehs[0] || safeVehicles[0];
+    const initialVehicleId = firstAvailVeh ? firstAvailVeh.id : "";
     setSelectedVehicleId(initialVehicleId);
 
-    // Choose assigned or available driver from pool
-    if (firstAvailVeh && firstAvailVeh.assignedDriverId && availableDrivers.some(d => d.id === firstAvailVeh.assignedDriverId)) {
-      setSelectedDriverId(firstAvailVeh.assignedDriverId);
+    if (firstAvailVeh) {
+      const defaultDriverName = DEFAULT_CAR_DRIVER_PAIRS[firstAvailVeh.plateNumber];
+      const pairedDriver = safeDrivers.find(d => 
+        (defaultDriverName && d.name.toLowerCase().includes(defaultDriverName.toLowerCase())) ||
+        (firstAvailVeh.assignedDriverId && d.id === firstAvailVeh.assignedDriverId)
+      ) || safeDrivers.find(d => isDriverAvailable(d, req.id)) || safeDrivers[0];
+      if (pairedDriver) {
+        setSelectedDriverId(pairedDriver.id);
+      }
     } else {
-      setSelectedDriverId(availableDrivers[0]?.id || "");
+      setSelectedDriverId(safeDrivers[0]?.id || "");
     }
   };
 
@@ -232,20 +268,20 @@ export const ApprovalTravelLogs: React.FC<ApprovalTravelLogsProps> = ({
     if (!approvingRequest) return;
     
     if (!selectedVehicleId || !selectedDriverId) {
-      alert("Please ensure both an available vehicle and an active certified driver are selected before dispatching.");
+      alert("Please ensure both an available vehicle and a certified driver are selected before dispatching.");
       return;
     }
 
     const selectedVeh = safeVehicles.find(v => v.id === selectedVehicleId);
     const selectedDrv = safeDrivers.find(d => d.id === selectedDriverId);
 
-    if (!selectedVeh || !isVehicleAvailable(selectedVeh, approvingRequest.id)) {
-      alert(`Allocation Denied: Vehicle ${selectedVeh?.plateNumber || selectedVehicleId} is currently "${selectedVeh?.status || 'Unavailable'}". Only vehicles that have returned and are in "Available" status can be allocated.`);
+    if (!selectedVeh) {
+      alert("Please select a valid vehicle.");
       return;
     }
 
-    if (!selectedDrv || !isDriverAvailable(selectedDrv, approvingRequest.id)) {
-      alert(`Assignment Denied: Driver ${selectedDrv?.name || selectedDriverId} is currently "${selectedDrv?.status || 'Unavailable'}". Only drivers who have returned and are "Active / Available" can be assigned.`);
+    if (!selectedDrv) {
+      alert("Please select a valid certified driver.");
       return;
     }
 
@@ -419,6 +455,26 @@ export const ApprovalTravelLogs: React.FC<ApprovalTravelLogsProps> = ({
       {/* Sub-Tab Navigation Bar */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-3 flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2 text-xs">
+          {/* Dedicated Pending Approvals Dashboard (Primary) */}
+          <button
+            onClick={() => setActiveSubTab("pending")}
+            className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-lg font-bold transition ${
+              activeSubTab === "pending"
+                ? "bg-amber-500 text-slate-950 border border-amber-400 shadow-sm"
+                : "text-slate-700 hover:bg-slate-50 border border-transparent font-semibold"
+            }`}
+          >
+            <Clock className="w-4 h-4 text-amber-600" />
+            <span>Pending Approvals Dashboard</span>
+            <span className={`px-2 py-0.5 rounded-full font-black text-[10px] ${
+              stage1Requests.length + stage2Requests.length > 0
+                ? "bg-slate-950 text-amber-300"
+                : "bg-slate-200 text-slate-700"
+            }`}>
+              {stage1Requests.length + stage2Requests.length}
+            </span>
+          </button>
+
           {/* Universal Pipeline & All Requests */}
           <button
             onClick={() => setActiveSubTab("all_requests")}
@@ -580,6 +636,290 @@ export const ApprovalTravelLogs: React.FC<ApprovalTravelLogsProps> = ({
           >
             Allocate & Dispatch ({stage2Requests.length}) ➔
           </button>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* SUB-TAB: PENDING APPROVALS DASHBOARD (PRIMARY COMMAND CENTER) */}
+      {/* ========================================================================= */}
+      {activeSubTab === "pending" && (
+        <div className="space-y-4">
+          {/* Header Banner */}
+          <div className="bg-slate-900 text-white rounded-xl p-5 border border-slate-800 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center space-x-3.5">
+              <div className="p-3 rounded-xl bg-amber-500 text-slate-950">
+                <Clock className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-white flex items-center gap-2">
+                  <span>Pending Approvals Command Center</span>
+                  <span className="bg-amber-400 text-slate-950 text-xs font-black px-2.5 py-0.5 rounded-full">
+                    {stage1Requests.length + stage2Requests.length} Pending
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-300 mt-1">
+                  Review employee trip submissions, endorse research missions, and allocate institutional vehicles with designated drivers.
+                </p>
+              </div>
+            </div>
+
+            {/* Sub-stage Quick Filter Tabs */}
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <button
+                onClick={() => setPendingFilter("all")}
+                className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 ${
+                  pendingFilter === "all"
+                    ? "bg-white text-slate-950 shadow-sm font-black"
+                    : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                }`}
+              >
+                <span>All Pending</span>
+                <span className="px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-900 text-[10px]">
+                  {stage1Requests.length + stage2Requests.length}
+                </span>
+              </button>
+
+              <button
+                onClick={() => setPendingFilter("stage1")}
+                className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 ${
+                  pendingFilter === "stage1"
+                    ? "bg-amber-400 text-slate-950 shadow-sm font-black"
+                    : "bg-slate-800 text-amber-300 hover:bg-slate-700"
+                }`}
+              >
+                <span>Stage 1: Director Review</span>
+                <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-slate-950 text-[10px]">
+                  {stage1Requests.length}
+                </span>
+              </button>
+
+              <button
+                onClick={() => setPendingFilter("stage2")}
+                className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 ${
+                  pendingFilter === "stage2"
+                    ? "bg-emerald-400 text-slate-950 shadow-sm font-black"
+                    : "bg-slate-800 text-emerald-300 hover:bg-slate-700"
+                }`}
+              >
+                <span>Stage 2: Fleet Allocation</span>
+                <span className="px-1.5 py-0.5 rounded-full bg-emerald-600 text-white text-[10px]">
+                  {stage2Requests.length}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {/* Pending Requests List */}
+          {(() => {
+            const pendingList = (pendingFilter === "stage1" 
+              ? stage1Requests 
+              : pendingFilter === "stage2" 
+              ? stage2Requests 
+              : [...stage1Requests, ...stage2Requests]
+            );
+            const filteredPending = filterList(pendingList);
+
+            if (filteredPending.length === 0) {
+              return (
+                <div className="bg-white rounded-xl p-12 text-center border border-slate-200 shadow-xs">
+                  <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
+                  <h4 className="text-base font-bold text-slate-800">All Field Mission Approvals are Up to Date!</h4>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
+                    {searchTerm 
+                      ? "No pending requests matched your search query." 
+                      : "There are currently no vehicle requests waiting for director endorsement or fleet manager dispatch."}
+                  </p>
+                  {onOpenNewTripModal && (
+                    <div className="mt-4">
+                      <button
+                        onClick={onOpenNewTripModal}
+                        className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition"
+                      >
+                        + Submit New Vehicle Booking Request
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
+            return (
+              <div className="space-y-3.5">
+                {filteredPending.map((req) => {
+                  const isStage1 = req.status === "Pending Director Approval" || (req.status as string) === "Pending";
+                  const isStage2 = req.status === "Pending Fleet Manager Authorization";
+
+                  return (
+                    <div
+                      key={req.id}
+                      className={`bg-white rounded-xl border shadow-xs overflow-hidden transition ${
+                        isStage1 
+                          ? "border-amber-200 hover:border-amber-400" 
+                          : "border-emerald-200 hover:border-emerald-400"
+                      }`}
+                    >
+                      {/* Card Top Header */}
+                      <div className={`p-4 border-b flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${
+                        isStage1 ? "bg-amber-50/60 border-amber-100" : "bg-emerald-50/60 border-emerald-100"
+                      }`}>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`font-mono font-bold px-2.5 py-0.5 rounded text-xs border ${
+                            isStage1 ? "bg-amber-200 text-amber-900 border-amber-300" : "bg-emerald-200 text-emerald-900 border-emerald-300"
+                          }`}>
+                            #{req.requestNumber}
+                          </span>
+
+                          <span className={`px-2.5 py-0.5 rounded-full font-extrabold text-[11px] flex items-center gap-1 ${
+                            isStage1 ? "bg-amber-100 text-amber-900 border border-amber-300" : "bg-emerald-100 text-emerald-900 border border-emerald-300"
+                          }`}>
+                            <Clock className="w-3 h-3" />
+                            <span>{isStage1 ? "Stage 1: Awaiting Director Review" : "Stage 2: Awaiting Vehicle Allocation"}</span>
+                          </span>
+
+                          <span className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${
+                            req.tripCategory === "Inside Town" ? "bg-blue-100 text-blue-800" : "bg-teal-100 text-teal-800"
+                          }`}>
+                            {req.tripCategory || "Outside Town"}
+                          </span>
+
+                          <span className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${
+                            req.urgency === "Critical / Emergency" ? "bg-rose-100 text-rose-800 border border-rose-300" :
+                            req.urgency === "High" ? "bg-amber-100 text-amber-800 border border-amber-300" : "bg-slate-100 text-slate-700"
+                          }`}>
+                            {req.urgency} Urgency
+                          </span>
+
+                          <span className="text-slate-500 text-[11px]">
+                            Station: <strong className="text-slate-700">{req.stationBase}</strong>
+                          </span>
+                        </div>
+
+                        {/* Direct Workflow Actions */}
+                        <div className="flex flex-wrap items-center gap-2">
+                          {isStage1 && (
+                            <>
+                              <button
+                                onClick={() => handleOpenDirectorModal(req, "permit")}
+                                className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>Director Endorse</span>
+                              </button>
+                              <button
+                                onClick={() => handleOpenApproveModal(req)}
+                                title="Fast-track directly into Fleet Allocation and Vehicle Dispatch"
+                                className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5"
+                              >
+                                <ShieldCheck className="w-3.5 h-3.5" />
+                                <span>Direct Dispatch</span>
+                              </button>
+                              <button
+                                onClick={() => handleOpenDirectorModal(req, "deny")}
+                                className="px-2.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs transition flex items-center gap-1"
+                              >
+                                <XCircle className="w-3.5 h-3.5" />
+                                <span>Decline</span>
+                              </button>
+                            </>
+                          )}
+
+                          {isStage2 && (
+                            <>
+                              <button
+                                onClick={() => handleOpenApproveModal(req)}
+                                className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5"
+                              >
+                                <Car className="w-3.5 h-3.5" />
+                                <span>Allocate Vehicle & Driver</span>
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setRejectingRequest(req);
+                                  setRejectionReason("All suitable field vehicles are currently deployed on higher-priority seed distribution.");
+                                }}
+                                className="px-2.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs transition flex items-center gap-1"
+                              >
+                                <XCircle className="w-3.5 h-3.5" />
+                                <span>Decline</span>
+                              </button>
+                            </>
+                          )}
+
+                          <button
+                            onClick={() => {
+                              const log = safeTravelLogs.find(l => l.tripRequestId === req.id);
+                              onViewVoucher(req, log);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 font-bold text-xs transition border border-slate-200 flex items-center gap-1"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                            <span>Voucher</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Card Body Details */}
+                      <div className="p-4 space-y-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                          <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase">Requester & Dept</span>
+                            <div className="font-bold text-slate-900 mt-0.5">{req.requesterName}</div>
+                            <div className="text-[11px] text-slate-500">{req.department} • 📞 {req.requesterPhone}</div>
+                          </div>
+
+                          <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase">Mission Route</span>
+                            <div className="font-bold text-slate-900 mt-0.5 flex items-center gap-1">
+                              <span>{req.origin}</span>
+                              <ArrowRight className="w-3 h-3 text-slate-400 shrink-0" />
+                              <span>{req.destination}</span>
+                            </div>
+                            <div className="text-[11px] text-slate-500">Est. {req.estimatedKm} km • {req.estimatedFuelLiters} L Fuel</div>
+                          </div>
+
+                          <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase">Field Mission Dates</span>
+                            <div className="font-bold text-slate-900 mt-0.5">
+                              {req.departureDate?.split('T')[0]} to {req.returnDate?.split('T')[0]}
+                            </div>
+                            <div className="text-[11px] text-slate-500">
+                              {req.passengerCount || 1} Passengers • {req.cargoWeightKg || 0} kg Cargo
+                            </div>
+                          </div>
+
+                          <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase">Stage Status</span>
+                            {isStage1 ? (
+                              <div className="text-amber-800 font-bold mt-0.5">Awaiting Supervisor Endorsement</div>
+                            ) : (
+                              <div>
+                                <div className="text-emerald-800 font-bold mt-0.5">Endorsed by Director</div>
+                                <div className="text-[10px] text-slate-500 truncate">{req.directorApprovedBy}</div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Research Purpose Note */}
+                        <div className="bg-slate-50/80 p-2.5 rounded-lg text-xs text-slate-600 flex items-start gap-2 border border-slate-100">
+                          <MessageSquare className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />
+                          <div>
+                            <span className="font-bold text-slate-800">Mission Purpose: </span>
+                            <span>{req.purpose}</span>
+                            {req.directorNotes && (
+                              <div className="text-emerald-800 text-[11px] mt-1 italic font-medium">
+                                Directorate Endorsement: "{req.directorNotes}"
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -1894,12 +2234,17 @@ export const ApprovalTravelLogs: React.FC<ApprovalTravelLogsProps> = ({
                   <select
                     value={selectedVehicleId}
                     onChange={(e) => {
-                      setSelectedVehicleId(e.target.value);
-                      const veh = safeVehicles.find(v => v.id === e.target.value);
-                      if (veh && veh.assignedDriverId) {
-                        const d = safeDrivers.find(drv => drv.id === veh.assignedDriverId);
-                        if (d && isDriverAvailable(d, approvingRequest.id)) {
-                          setSelectedDriverId(veh.assignedDriverId);
+                      const newVid = e.target.value;
+                      setSelectedVehicleId(newVid);
+                      const veh = safeVehicles.find(v => v.id === newVid);
+                      if (veh) {
+                        const defaultDriverName = DEFAULT_CAR_DRIVER_PAIRS[veh.plateNumber];
+                        const pairedDriver = safeDrivers.find(drv => 
+                          (defaultDriverName && drv.name.toLowerCase().includes(defaultDriverName.toLowerCase())) ||
+                          (veh.assignedDriverId && drv.id === veh.assignedDriverId)
+                        );
+                        if (pairedDriver) {
+                          setSelectedDriverId(pairedDriver.id);
                         }
                       }
                     }}
@@ -1912,6 +2257,7 @@ export const ApprovalTravelLogs: React.FC<ApprovalTravelLogsProps> = ({
                     <option value="" disabled>-- Select Available Vehicle --</option>
                     {safeVehicles.map((v) => {
                       const isAvail = isVehicleAvailable(v, approvingRequest.id);
+                      const designatedDriver = DEFAULT_CAR_DRIVER_PAIRS[v.plateNumber];
                       return (
                         <option 
                           key={v.id} 
@@ -1920,7 +2266,7 @@ export const ApprovalTravelLogs: React.FC<ApprovalTravelLogsProps> = ({
                           className={!isAvail ? "text-slate-400 bg-slate-100" : "text-slate-900 font-semibold"}
                         >
                           {isAvail ? "🟢 " : "🔴 "}
-                          {v.plateNumber} - {v.model} ({v.type}) [{isAvail ? "Available / Ready" : (v.status === "On Mission" ? "On Mission / In Field" : v.status)}]
+                          {v.plateNumber} - {v.model} ({v.type}) {designatedDriver ? `[Driver: ${designatedDriver}]` : ""} [{isAvail ? "Available" : (v.status === "On Mission" ? "In Field" : v.status)}]
                           {!isAvail ? " (Unavailable)" : ""}
                         </option>
                       );
@@ -1984,15 +2330,17 @@ export const ApprovalTravelLogs: React.FC<ApprovalTravelLogsProps> = ({
                     <option value="" disabled>-- Select Certified Driver --</option>
                     {safeDrivers.map((d) => {
                       const isAvail = isDriverAvailable(d, approvingRequest.id);
+                      const isDefaultPaired = selectedVehicleObj && DEFAULT_CAR_DRIVER_PAIRS[selectedVehicleObj.plateNumber] &&
+                        d.name.toLowerCase().includes(DEFAULT_CAR_DRIVER_PAIRS[selectedVehicleObj.plateNumber].toLowerCase());
                       return (
                         <option 
                           key={d.id} 
                           value={d.id} 
                           disabled={!isAvail} 
-                          className={!isAvail ? "text-slate-400 bg-slate-100" : "text-slate-900 font-semibold"}
+                          className={!isAvail ? "text-slate-400 bg-slate-100" : isDefaultPaired ? "text-emerald-900 font-extrabold bg-emerald-50" : "text-slate-900 font-semibold"}
                         >
                           {isAvail ? "🟢 " : "🔴 "}
-                          {d.name} ({d.phone}) [{isAvail ? "Active / Ready" : d.status}]
+                          {d.name} ({d.phone}) {isDefaultPaired ? "⭐ [Designated Driver]" : ""} [{isAvail ? "Active / Ready" : d.status}]
                           {!isAvail ? " (Unavailable)" : ""}
                         </option>
                       );
@@ -2008,7 +2356,12 @@ export const ApprovalTravelLogs: React.FC<ApprovalTravelLogsProps> = ({
                     }`}>
                       <span className="flex items-center gap-1.5">
                         <User className="w-3.5 h-3.5 shrink-0" />
-                        <span>{selectedDriverObj.stationBase} • Lic: {selectedDriverObj.licenseNumber} • Rating: ⭐{selectedDriverObj.rating || 4.8}</span>
+                        <span>
+                          {selectedDriverObj.stationBase} • Lic: {selectedDriverObj.licenseNumber}
+                          {selectedVehicleObj && DEFAULT_CAR_DRIVER_PAIRS[selectedVehicleObj.plateNumber] && selectedDriverObj.name.toLowerCase().includes(DEFAULT_CAR_DRIVER_PAIRS[selectedVehicleObj.plateNumber].toLowerCase()) && (
+                            <strong className="text-emerald-800 ml-1 font-extrabold">• ⭐ Designated for {selectedVehicleObj.plateNumber}</strong>
+                          )}
+                        </span>
                       </span>
                       <span className="font-extrabold flex items-center gap-1">
                         {isDriverAvailable(selectedDriverObj, approvingRequest.id) ? (

@@ -766,6 +766,20 @@ export default function App() {
     setFuelRecords(prev => [newRec, ...prev]);
     saveFuelRecordToCloud(newRec).catch(e => console.warn("Firestore fuel save error:", e));
 
+    // Update vehicle's fuel level and odometer
+    if (newRec.vehicleId) {
+      setVehicles(prev => prev.map(v => {
+        if (v.id === newRec.vehicleId) {
+          const updatedOdo = Math.max(v.odometerKm, newRec.odometerAtRefuel);
+          const updatedFuel = Math.min(v.fuelTankCapacity || 80, (v.currentFuelLevel || 40) + newRec.liters);
+          const updatedVeh = { ...v, odometerKm: updatedOdo, currentFuelLevel: updatedFuel };
+          saveVehicleToCloud(updatedVeh).catch(e => console.warn(e));
+          return updatedVeh;
+        }
+        return v;
+      }));
+    }
+
     // 2. Server sync if available
     try {
       await fetch("/api/fuel-records", {
@@ -1320,7 +1334,13 @@ export default function App() {
   const safeDrivers = Array.isArray(drivers) ? drivers : [];
   const safeTravelLogs = Array.isArray(travelLogs) ? travelLogs : [];
 
-  const pendingRequestsCount = safeTripRequests.filter(r => r.status === "Pending").length;
+  const [approvalSubTab, setApprovalSubTab] = useState<"pending" | "all_requests" | "my_stages" | "stage1" | "stage2" | "active" | "all_logs" | "rejected">("pending");
+
+  const pendingRequestsCount = safeTripRequests.filter(r => 
+    r.status === "Pending Director Approval" || 
+    r.status === "Pending Fleet Manager Authorization" || 
+    (r.status as string) === "Pending"
+  ).length;
   const availableVehiclesCount = safeVehicles.filter(v => v.status === "Available").length;
 
   return (
@@ -1386,25 +1406,35 @@ export default function App() {
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
         {/* Top 4-Metric Overview Grid */}
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-white p-5 rounded-xl shadow-xs border border-slate-200 flex flex-col justify-between">
+          <div 
+            onClick={() => {
+              setActiveTab("approvals");
+              setApprovalSubTab("all_requests");
+            }}
+            className="bg-white p-5 rounded-xl shadow-xs border border-slate-200 flex flex-col justify-between cursor-pointer hover:shadow-md hover:border-emerald-300 transition group"
+          >
             <div className="flex justify-between items-start">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Active Requests</span>
-              <span className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider group-hover:text-emerald-700 transition">Active Requests</span>
+              <span className="p-1.5 bg-emerald-50 group-hover:bg-emerald-100 text-emerald-600 rounded-lg transition">
                 <Car className="w-4 h-4" />
               </span>
             </div>
             <div className="mt-4">
               <div className="text-2xl font-bold text-slate-800">{String(safeTripRequests.length).padStart(2, '0')}</div>
-              <div className="text-xs text-emerald-600 font-semibold mt-1 flex items-center gap-1">
+              <div className="text-xs text-emerald-600 font-semibold mt-1 flex items-center justify-between">
                 <span>↑ {safeTripRequests.filter(r => r.status === "Approved" || r.status === "In Progress").length} Active Field Missions</span>
+                <span className="text-[10px] bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-bold">View Pipeline →</span>
               </div>
             </div>
           </div>
 
-          <div className="bg-white p-5 rounded-xl shadow-xs border border-slate-200 flex flex-col justify-between">
+          <div 
+            onClick={() => setActiveTab("fuel")}
+            className="bg-white p-5 rounded-xl shadow-xs border border-slate-200 flex flex-col justify-between cursor-pointer hover:shadow-md hover:border-emerald-300 transition group"
+          >
             <div className="flex justify-between items-start">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Fuel Consumption</span>
-              <span className="p-1.5 bg-slate-50 text-emerald-600 rounded-lg">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider group-hover:text-emerald-700 transition">Fuel Consumption</span>
+              <span className="p-1.5 bg-slate-50 group-hover:bg-emerald-50 text-emerald-600 rounded-lg transition">
                 <Fuel className="w-4 h-4" />
               </span>
             </div>
@@ -1412,31 +1442,42 @@ export default function App() {
               <div className="text-2xl font-bold text-slate-800">
                 {safeFuelRecords.reduce((acc, curr) => acc + curr.liters, 0).toLocaleString()} L
               </div>
-              <div className="text-xs text-slate-400 font-medium mt-1">
-                Across 11 Research Stations
+              <div className="text-xs text-slate-500 font-medium mt-1 flex items-center justify-between">
+                <span>Across 11 Research Stations</span>
+                <span className="text-[10px] bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-bold">Open Hub →</span>
               </div>
             </div>
           </div>
 
-          <div className="bg-white p-5 rounded-xl shadow-xs border border-slate-200 flex flex-col justify-between">
+          <div 
+            onClick={() => {
+              setActiveTab("approvals");
+              setApprovalSubTab("pending");
+            }}
+            className="bg-white p-5 rounded-xl shadow-xs border border-slate-200 flex flex-col justify-between cursor-pointer hover:shadow-md hover:border-amber-300 transition group"
+          >
             <div className="flex justify-between items-start">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Pending Approvals</span>
-              <span className="p-1.5 bg-amber-50 text-amber-600 rounded-lg">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider group-hover:text-amber-700 transition">Pending Approvals</span>
+              <span className="p-1.5 bg-amber-50 group-hover:bg-amber-100 text-amber-600 rounded-lg transition">
                 <Clock className="w-4 h-4" />
               </span>
             </div>
             <div className="mt-4">
               <div className="text-2xl font-bold text-amber-600">{String(pendingRequestsCount).padStart(2, '0')}</div>
-              <div className="text-xs text-amber-700 font-medium mt-1">
-                Action Required By Officer
+              <div className="text-xs text-amber-700 font-medium mt-1 flex items-center justify-between">
+                <span>Action Required By Officer</span>
+                <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold">Open Dashboard →</span>
               </div>
             </div>
           </div>
 
-          <div className="bg-white p-5 rounded-xl shadow-xs border border-slate-200 flex flex-col justify-between">
+          <div 
+            onClick={() => setActiveTab("maintenance")}
+            className="bg-white p-5 rounded-xl shadow-xs border border-slate-200 flex flex-col justify-between cursor-pointer hover:shadow-md hover:border-slate-400 transition group"
+          >
             <div className="flex justify-between items-start">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Scheduled Maint.</span>
-              <span className="p-1.5 bg-slate-50 text-slate-700 rounded-lg">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider group-hover:text-slate-700 transition">Scheduled Maint.</span>
+              <span className="p-1.5 bg-slate-50 group-hover:bg-slate-100 text-slate-700 rounded-lg transition">
                 <Wrench className="w-4 h-4" />
               </span>
             </div>
@@ -1444,8 +1485,9 @@ export default function App() {
               <div className="text-2xl font-bold text-slate-800">
                 {String(safeVehicles.filter(v => v.status === "In Maintenance").length + safeMaintenanceRecords.filter(m => m.status === "Scheduled").length).padStart(2, '0')}
               </div>
-              <div className="text-xs text-slate-400 font-medium mt-1">
-                Workshop & Service Queue
+              <div className="text-xs text-slate-400 font-medium mt-1 flex items-center justify-between">
+                <span>Workshop & Service Queue</span>
+                <span className="text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-bold">Manage →</span>
               </div>
             </div>
           </div>
@@ -1485,6 +1527,7 @@ export default function App() {
             travelLogs={safeTravelLogs}
             officers={officers}
             role={currentRole}
+            initialSubTab={approvalSubTab}
             onDirectorReview={handleDirectorReview}
             onApproveRequest={handleApproveRequest}
             onRejectRequest={handleRejectRequest}
@@ -1492,6 +1535,7 @@ export default function App() {
             onViewVoucher={handleViewVoucher}
             onOpenRoleAuth={handleOpenRoleAuth}
             onOpenOfficerModal={() => setIsOfficerModalOpen(true)}
+            onOpenNewTripModal={() => setActiveTab("booking")}
           />
         )}
 

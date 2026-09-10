@@ -16,6 +16,15 @@ import {
   TripStatus, 
   NotificationChannel 
 } from "./src/types";
+import {
+  MOCK_VEHICLES,
+  MOCK_DRIVERS,
+  MOCK_TRIP_REQUESTS,
+  MOCK_TRAVEL_LOGS,
+  MOCK_FUEL_RECORDS,
+  MOCK_MAINTENANCE_RECORDS,
+  MOCK_SMS_ALERTS
+} from "./src/data/mockData";
 
 dotenv.config();
 
@@ -711,14 +720,17 @@ function loadDatabase(): DatabaseState {
       const raw = fs.readFileSync(DB_FILE, "utf-8");
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === "object") {
+        const hasUserCars = Array.isArray(parsed.vehicles) && parsed.vehicles.some((v: any) => v.plateNumber === "4-00492");
+        const hasUserDrivers = Array.isArray(parsed.drivers) && parsed.drivers.some((d: any) => d.name === "Adunyaa Tafari");
+        const hasUserFuel = Array.isArray(parsed.fuelRecords) && parsed.fuelRecords.some((f: any) => f.vehiclePlate === "4-00492") && parsed.fuelRecords.length >= 16;
         return {
-          vehicles: Array.isArray(parsed.vehicles) && parsed.vehicles.length > 0 ? parsed.vehicles : initialVehicles,
-          drivers: Array.isArray(parsed.drivers) && parsed.drivers.length > 0 ? parsed.drivers : initialDrivers,
-          tripRequests: Array.isArray(parsed.tripRequests) ? parsed.tripRequests : initialTripRequests,
-          travelLogs: Array.isArray(parsed.travelLogs) ? parsed.travelLogs : initialTravelLogs,
-          smsAlerts: Array.isArray(parsed.smsAlerts) ? parsed.smsAlerts : initialSmsAlerts,
-          fuelRecords: Array.isArray(parsed.fuelRecords) ? parsed.fuelRecords : initialFuelRecords,
-          maintenanceRecords: Array.isArray(parsed.maintenanceRecords) ? parsed.maintenanceRecords : initialMaintenanceRecords,
+          vehicles: hasUserCars && parsed.vehicles.length >= 16 ? parsed.vehicles : MOCK_VEHICLES,
+          drivers: hasUserDrivers && parsed.drivers.length >= 16 ? parsed.drivers : MOCK_DRIVERS,
+          tripRequests: Array.isArray(parsed.tripRequests) && parsed.tripRequests.length > 0 ? parsed.tripRequests : MOCK_TRIP_REQUESTS,
+          travelLogs: Array.isArray(parsed.travelLogs) && parsed.travelLogs.length > 0 ? parsed.travelLogs : MOCK_TRAVEL_LOGS,
+          smsAlerts: Array.isArray(parsed.smsAlerts) ? parsed.smsAlerts : MOCK_SMS_ALERTS,
+          fuelRecords: hasUserFuel ? parsed.fuelRecords : MOCK_FUEL_RECORDS,
+          maintenanceRecords: Array.isArray(parsed.maintenanceRecords) ? parsed.maintenanceRecords : MOCK_MAINTENANCE_RECORDS,
           officers: Array.isArray(parsed.officers) && parsed.officers.length > 0 ? parsed.officers : initialOfficers
         };
       }
@@ -727,13 +739,13 @@ function loadDatabase(): DatabaseState {
     console.error("Error reading storage file, falling back to initial data:", err);
   }
   return {
-    vehicles: initialVehicles,
-    drivers: initialDrivers,
-    tripRequests: initialTripRequests,
-    travelLogs: initialTravelLogs,
-    smsAlerts: initialSmsAlerts,
-    fuelRecords: initialFuelRecords,
-    maintenanceRecords: initialMaintenanceRecords,
+    vehicles: MOCK_VEHICLES,
+    drivers: MOCK_DRIVERS,
+    tripRequests: MOCK_TRIP_REQUESTS,
+    travelLogs: MOCK_TRAVEL_LOGS,
+    smsAlerts: MOCK_SMS_ALERTS,
+    fuelRecords: MOCK_FUEL_RECORDS,
+    maintenanceRecords: MOCK_MAINTENANCE_RECORDS,
     officers: initialOfficers
   };
 }

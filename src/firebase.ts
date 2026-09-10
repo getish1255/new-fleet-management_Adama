@@ -270,19 +270,21 @@ export async function saveSmsAlertToCloud(a: SMSAlert): Promise<void> {
 // ==========================================
 export async function seedInitialFirestoreData(): Promise<void> {
   try {
-    // 1. Vehicles
+    // 1. Vehicles - Ensure the user's 16 cars exist in Firestore
     const vSnap = await getDocs(collection(db, "vehicles"));
-    if (vSnap.empty) {
-      console.log("[Firestore] Seeding baseline vehicles...");
+    const hasUserCar = vSnap.docs.some(d => d.data().plateNumber === "4-00492");
+    if (vSnap.empty || !hasUserCar || vSnap.size < 16) {
+      console.log("[Firestore] Seeding default 16 vehicles...");
       for (const v of MOCK_VEHICLES) {
         await setDoc(doc(db, "vehicles", v.id), sanitizePayload(v), { merge: true });
       }
     }
 
-    // 2. Drivers
+    // 2. Drivers - Ensure the user's 16 drivers exist in Firestore
     const dSnap = await getDocs(collection(db, "drivers"));
-    if (dSnap.empty) {
-      console.log("[Firestore] Seeding baseline drivers...");
+    const hasUserDriver = dSnap.docs.some(d => d.data().name === "Adunyaa Tafari");
+    if (dSnap.empty || !hasUserDriver || dSnap.size < 16) {
+      console.log("[Firestore] Seeding default 16 drivers...");
       for (const d of MOCK_DRIVERS) {
         await setDoc(doc(db, "drivers", d.id), sanitizePayload(d), { merge: true });
       }
@@ -317,7 +319,9 @@ export async function seedInitialFirestoreData(): Promise<void> {
 
     // 6. Fuel Records
     const fSnap = await getDocs(collection(db, "fuelRecords"));
-    if (fSnap.empty) {
+    const hasAllUserFuel = fSnap.docs.some(d => d.data().vehiclePlate === "4-00492") && fSnap.docs.length >= 16;
+    if (fSnap.empty || !hasAllUserFuel) {
+      console.log("[Firestore] Seeding 16 vehicle fuel records...");
       for (const f of MOCK_FUEL_RECORDS) {
         await setDoc(doc(db, "fuelRecords", f.id), sanitizePayload(f), { merge: true });
       }
@@ -340,5 +344,21 @@ export async function seedInitialFirestoreData(): Promise<void> {
     }
   } catch (err) {
     console.error("[Firestore] Seeding error:", err);
+  }
+}
+
+export async function forceSyncDefaultFleetToFirestore(): Promise<void> {
+  try {
+    for (const v of MOCK_VEHICLES) {
+      await setDoc(doc(db, "vehicles", v.id), sanitizePayload(v), { merge: true });
+    }
+    for (const d of MOCK_DRIVERS) {
+      await setDoc(doc(db, "drivers", d.id), sanitizePayload(d), { merge: true });
+    }
+    for (const f of MOCK_FUEL_RECORDS) {
+      await setDoc(doc(db, "fuelRecords", f.id), sanitizePayload(f), { merge: true });
+    }
+  } catch (err) {
+    console.error("[Firestore] forceSyncDefaultFleetToFirestore error:", err);
   }
 }
